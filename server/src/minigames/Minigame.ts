@@ -7,6 +7,7 @@ export type Minigame = {
   minPlayers: number;
   maxPlayers: number;
   setup(room: Room): GameSnapshot;
-  handleInput(room: Room, playerId: string, input: string): GameSnapshot;
+  handleInput(room: Room, playerId: string | undefined, input: unknown): GameSnapshot;
+  update?(room: Room, deltaMs: number): GameSnapshot;
   finish(room: Room): GameSnapshot;
 };

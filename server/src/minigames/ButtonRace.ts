@@ -19,9 +19,9 @@ export const buttonRace: Minigame = {
     };
   },
 
-  handleInput(room: Room, playerId: string, input: string): GameSnapshot {
+  handleInput(room: Room, playerId: string | undefined, input: unknown): GameSnapshot {
     if (input === "PRESS" && room.game && room.game.endsAt > Date.now()) {
-      room.game.scores[playerId] = (room.game.scores[playerId] ?? 0) + 1;
+      room.game.scores[playerId!] = (room.game.scores[playerId!] ?? 0) + 1;
     }
     return room.game!;
   },

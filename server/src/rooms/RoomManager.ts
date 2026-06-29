@@ -42,7 +42,12 @@ export class RoomManager {
     return code ? this.rooms.get(code) : undefined;
   }
 
-  handleRoomMessage(playerId: string, message: ClientMessage, onGameFinished: (room: Room) => void): Room {
+  handleRoomMessage(
+    playerId: string,
+    message: ClientMessage,
+    onGameFinished: (room: Room) => void,
+    onGameTick?: (room: Room) => void,
+  ): Room {
     const room = this.getRoomForPlayer(playerId);
     if (!room) throw new Error("Create or join a room first.");
 
@@ -56,7 +61,7 @@ export class RoomManager {
       const minigame = getMinigame(minigameId);
       if (!minigame) throw new Error("Unknown minigame.");
       if (!room.canStart(playerId, minigame)) throw new Error("Only the host can start when all players are ready.");
-      room.start(minigame, () => onGameFinished(room));
+      room.start(minigame, () => onGameFinished(room), () => onGameTick?.(room));
       return room;
     }
 

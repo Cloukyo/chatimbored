@@ -39,7 +39,46 @@ export type GameSnapshot = {
   endsAt: number;
   scores: Record<string, number>;
   winnerId?: string;
+  actNatural?: ActNaturalState;
 };
+
+export type Vector2Payload = {
+  x: number;
+  y: number;
+};
+
+export type ActNaturalPlayerState = {
+  id: string;
+  x: number;
+  y: number;
+  alive: boolean;
+  shotAvailable: boolean;
+  aim: Vector2Payload;
+  running: boolean;
+};
+
+export type ActNaturalNpcState = {
+  id: string;
+  x: number;
+  y: number;
+  speed: number;
+  drift: number;
+};
+
+export type ActNaturalState = {
+  arena: { width: number; height: number; exitX: number };
+  players: ActNaturalPlayerState[];
+  npcs: ActNaturalNpcState[];
+};
+
+export type ActNaturalInput = {
+  movement: Vector2Payload;
+  aim: Vector2Payload;
+  shoot: boolean;
+  run: boolean;
+};
+
+export type PlayerInputPayload = "PRESS" | ActNaturalInput;
 
 export type ClientMessage =
   | { type: "CREATE_ROOM"; displayName: string }
@@ -47,7 +86,7 @@ export type ClientMessage =
   | { type: "LEAVE_ROOM" }
   | { type: "PLAYER_READY"; isReady: boolean }
   | { type: "START_GAME"; minigameId?: string }
-  | { type: "PLAYER_INPUT"; input: "PRESS" }
+  | { type: "PLAYER_INPUT"; input: PlayerInputPayload }
   | { type: "RETURN_TO_LOBBY" };
 
 export type ServerMessage =

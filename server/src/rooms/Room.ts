@@ -1,4 +1,4 @@
-import { DEFAULT_MINIGAME_ID, MAX_PLAYERS, MIN_PLAYERS } from "../../../shared/constants/platform.js";
+import { ACT_NATURAL_TICK_MS, DEFAULT_MINIGAME_ID, MAX_PLAYERS, MIN_PLAYERS } from "../../../shared/constants/platform.js";
 import type { GameSnapshot, RoomSnapshot } from "../../../shared/message-types/protocol.js";
 import type { Minigame } from "../minigames/Minigame.js";
 import type { Player } from "./Player.js";
@@ -10,6 +10,8 @@ export class Room {
   phase: RoomSnapshot["phase"] = "lobby";
   game?: GameSnapshot;
   private endTimer?: NodeJS.Timeout;
+  private tickTimer?: NodeJS.Timeout;
+  private lastTickAt = 0;
 
   constructor(code: string) {
     this.code = code;
@@ -54,11 +56,21 @@ export class Room {
     );
   }
 
-  start(minigame: Minigame, onFinished: () => void): GameSnapshot {
+  start(minigame: Minigame, onFinished: () => void, onTick?: () => void): GameSnapshot {
     this.clearTimer();
     this.phase = "in_game";
     this.selectedMinigameId = minigame.id;
     this.game = minigame.setup(this);
+    this.lastTickAt = Date.now();
+    if (minigame.update) {
+      this.tickTimer = setInterval(() => {
+        const now = Date.now();
+        minigame.update?.(this, now - this.lastTickAt);
+        this.lastTickAt = now;
+        onTick?.();
+        if (this.game?.winnerId) onFinished();
+      }, ACT_NATURAL_TICK_MS);
+    }
     this.endTimer = setTimeout(onFinished, Math.max(0, this.game.endsAt - Date.now()));
     return this.game;
   }
@@ -88,6 +100,8 @@ export class Room {
 
   private clearTimer(): void {
     if (this.endTimer) clearTimeout(this.endTimer);
+    if (this.tickTimer) clearInterval(this.tickTimer);
     this.endTimer = undefined;
+    this.tickTimer = undefined;
   }
 }

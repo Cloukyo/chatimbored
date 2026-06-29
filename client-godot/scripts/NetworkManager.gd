@@ -39,11 +39,23 @@ func join_room(room_code: String, display_name: String) -> void:
 func set_ready(is_ready: bool) -> void:
 	_send({"type": "PLAYER_READY", "isReady": is_ready})
 
-func start_game() -> void:
-	_send({"type": "START_GAME", "minigameId": room.selected_minigame_id})
+func start_game(minigame_id := "") -> void:
+	var selected := minigame_id if minigame_id != "" else room.selected_minigame_id
+	_send({"type": "START_GAME", "minigameId": selected})
 
 func send_press() -> void:
 	_send({"type": "PLAYER_INPUT", "input": "PRESS"})
+
+func send_act_natural_input(movement: Vector2, aim: Vector2, shoot: bool, run: bool) -> void:
+	_send({
+		"type": "PLAYER_INPUT",
+		"input": {
+			"movement": {"x": movement.x, "y": movement.y},
+			"aim": {"x": aim.x, "y": aim.y},
+			"shoot": shoot,
+			"run": run
+		}
+	})
 
 func return_to_lobby() -> void:
 	_send({"type": "RETURN_TO_LOBBY"})

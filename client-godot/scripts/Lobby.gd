@@ -6,6 +6,7 @@ var minigame_label: Label
 var status_label: Label
 var ready_button: Button
 var start_button: Button
+var minigame_selector: OptionButton
 
 func _ready() -> void:
 	NetworkManager.room_state_changed.connect(_on_room_state_changed)
@@ -34,6 +35,13 @@ func _build_ui() -> void:
 	minigame_label = Label.new()
 	root.add_child(minigame_label)
 
+	minigame_selector = OptionButton.new()
+	minigame_selector.add_item("Button Race")
+	minigame_selector.set_item_metadata(0, "button_race")
+	minigame_selector.add_item("Act Natural")
+	minigame_selector.set_item_metadata(1, "act_natural")
+	root.add_child(minigame_selector)
+
 	players_box = VBoxContainer.new()
 	players_box.add_theme_constant_override("separation", 8)
 	root.add_child(players_box)
@@ -47,8 +55,8 @@ func _build_ui() -> void:
 	actions.add_child(ready_button)
 
 	start_button = Button.new()
-	start_button.text = "Start Button Race"
-	start_button.pressed.connect(NetworkManager.start_game)
+	start_button.text = "Start Minigame"
+	start_button.pressed.connect(_on_start_pressed)
 	actions.add_child(start_button)
 
 	status_label = Label.new()
@@ -57,7 +65,7 @@ func _build_ui() -> void:
 func _render() -> void:
 	var room := NetworkManager.room
 	room_label.text = "Room %s" % room.code
-	minigame_label.text = "Selected minigame: Button Race"
+	minigame_label.text = "Selected minigame: %s" % minigame_selector.get_item_text(minigame_selector.selected)
 
 	for child in players_box.get_children():
 		child.queue_free()
@@ -74,7 +82,11 @@ func _render() -> void:
 	start_button.disabled = not _can_local_host_start()
 
 	if room.phase == "in_game":
-		get_tree().change_scene_to_file("res://scenes/GameScreen.tscn")
+		var game_id: String = str(room.game.get("minigameId", room.selected_minigame_id))
+		if game_id == "act_natural":
+			get_tree().change_scene_to_file("res://scenes/ActNatural.tscn")
+		else:
+			get_tree().change_scene_to_file("res://scenes/GameScreen.tscn")
 
 func _can_local_host_start() -> bool:
 	var room := NetworkManager.room
@@ -88,6 +100,9 @@ func _can_local_host_start() -> bool:
 func _on_ready_pressed() -> void:
 	var local := NetworkManager.room.local_player(NetworkManager.player_id)
 	NetworkManager.set_ready(not local.get("isReady", false))
+
+func _on_start_pressed() -> void:
+	NetworkManager.start_game(str(minigame_selector.get_selected_metadata()))
 
 func _on_room_state_changed(_room: RoomState, _player_id: String) -> void:
 	_render()

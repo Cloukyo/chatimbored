@@ -41,7 +41,7 @@ wss.on("connection", (socket) => {
       }
 
       if (!playerId) throw new Error("Create or join a room first.");
-      const room = manager.handleRoomMessage(playerId, message, finishAndBroadcast);
+      const room = manager.handleRoomMessage(playerId, message, finishAndBroadcast, broadcastRoom);
       broadcastRoom(room);
     } catch (error) {
       send(socket, { type: MESSAGE_TYPES.ERROR, message: error instanceof Error ? error.message : "Invalid message." });

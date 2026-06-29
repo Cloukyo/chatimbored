@@ -60,6 +60,14 @@ func send_act_natural_input(movement: Vector2, aim: Vector2, shoot: bool, run: b
 		"input": input
 	})
 
+func send_loot_and_leave_input(movement: Vector2) -> void:
+	_send({
+		"type": "PLAYER_INPUT",
+		"input": {
+			"movement": {"x": movement.x, "y": movement.y}
+		}
+	})
+
 func return_to_lobby() -> void:
 	_send({"type": "RETURN_TO_LOBBY"})
 

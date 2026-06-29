@@ -40,6 +40,7 @@ export type GameSnapshot = {
   scores: Record<string, number>;
   winnerId?: string;
   actNatural?: ActNaturalState;
+  lootAndLeave?: LootAndLeaveState;
 };
 
 export type Vector2Payload = {
@@ -89,7 +90,79 @@ export type ActNaturalInput = {
   run: boolean;
 };
 
-export type PlayerInputPayload = "PRESS" | ActNaturalInput;
+export type LootAndLeavePlayerState = {
+  id: string;
+  x: number;
+  y: number;
+  spawnX: number;
+  spawnY: number;
+  lives: number;
+  carriedCash: number;
+  bankedCash: number;
+  alive: boolean;
+  escaped: boolean;
+  out: boolean;
+  moveCooldownTicks: number;
+  facing: Vector2Payload;
+};
+
+export type LootAndLeaveSlimeState = {
+  id: string;
+  x: number;
+  y: number;
+  cooldownTicks: number;
+};
+
+export type LootAndLeaveBagState = {
+  id: string;
+  ownerId: string;
+  x: number;
+  y: number;
+  cash: number;
+};
+
+export type LootAndLeaveEvent = {
+  type:
+    | "gem"
+    | "loot_drop"
+    | "loot_recover"
+    | "player_hit"
+    | "rock_impact"
+    | "slime_hit"
+    | "exit_unlocked"
+    | "escaped"
+    | "level_start"
+    | "match_over";
+  x?: number;
+  y?: number;
+  playerId?: string;
+  cash?: number;
+  message: string;
+};
+
+export type LootAndLeaveState = {
+  level: number;
+  seed: number;
+  tick: number;
+  cave: { width: number; height: number; tiles: number[] };
+  players: LootAndLeavePlayerState[];
+  slimes: LootAndLeaveSlimeState[];
+  lootBags: LootAndLeaveBagState[];
+  exit: { x: number; y: number };
+  exitUnlocked: boolean;
+  exitUnlockThreshold: number;
+  gemsCollected: number;
+  threatLevel: number;
+  earthquakeWarning: boolean;
+  message: string;
+  lastEvent?: LootAndLeaveEvent;
+};
+
+export type LootAndLeaveInput = {
+  movement: Vector2Payload;
+};
+
+export type PlayerInputPayload = "PRESS" | ActNaturalInput | LootAndLeaveInput;
 
 export type ClientMessage =
   | { type: "CREATE_ROOM"; displayName: string }

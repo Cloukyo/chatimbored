@@ -40,6 +40,8 @@ func _build_ui() -> void:
 	minigame_selector.set_item_metadata(0, "button_race")
 	minigame_selector.add_item("Act Natural")
 	minigame_selector.set_item_metadata(1, "act_natural")
+	minigame_selector.add_item("Loot & Leave")
+	minigame_selector.set_item_metadata(2, "loot_and_leave")
 	root.add_child(minigame_selector)
 
 	players_box = VBoxContainer.new()
@@ -85,6 +87,8 @@ func _render() -> void:
 		var game_id: String = str(room.game.get("minigameId", room.selected_minigame_id))
 		if game_id == "act_natural":
 			get_tree().change_scene_to_file("res://scenes/ActNatural.tscn")
+		elif game_id == "loot_and_leave":
+			get_tree().change_scene_to_file("res://scenes/LootAndLeave.tscn")
 		else:
 			get_tree().change_scene_to_file("res://scenes/GameScreen.tscn")
 

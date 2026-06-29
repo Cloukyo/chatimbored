@@ -1,0 +1,330 @@
+extends Control
+
+const INPUT_INTERVAL := 0.05
+const TILE_SIZE := 34.0
+const HUD_HEIGHT := 86.0
+const EFFECT_SECONDS := 0.32
+
+const EMPTY := 0
+const WALL := 1
+const DIRT := 2
+const ROCK := 3
+const GEM := 4
+const EXIT := 5
+const RUBY := 6
+
+var game: Dictionary = {}
+var send_timer := 0.0
+var last_event_key := ""
+var animated_effects: Array[Dictionary] = []
+var shake_timer := 0.0
+var winner_panel: PanelContainer
+var winner_label: Label
+var winner_detail_label: Label
+var return_button: Button
+var hud_label: Label
+var controls_label: Label
+
+func _ready() -> void:
+	NetworkManager.room_state_changed.connect(_on_room_state_changed)
+	NetworkManager.game_state_changed.connect(_on_game_state_changed)
+	NetworkManager.game_over.connect(_on_game_over)
+	_build_ui()
+	game = NetworkManager.room.game
+	queue_redraw()
+
+func _process(delta: float) -> void:
+	send_timer -= delta
+	_update_effects(delta)
+	shake_timer = max(0.0, shake_timer - delta)
+	if send_timer <= 0.0:
+		send_timer = INPUT_INTERVAL
+		_send_input()
+	queue_redraw()
+
+func _build_ui() -> void:
+	hud_label = Label.new()
+	hud_label.offset_left = 18
+	hud_label.offset_top = 12
+	hud_label.add_theme_font_size_override("font_size", 22)
+	add_child(hud_label)
+
+	controls_label = Label.new()
+	controls_label.text = "WASD / Arrow keys move and dig | collect gems | escape when the exit opens | avoid rocks and slimes"
+	controls_label.offset_left = 18
+	controls_label.offset_top = 48
+	add_child(controls_label)
+
+	winner_panel = PanelContainer.new()
+	winner_panel.visible = false
+	winner_panel.anchor_left = 0.5
+	winner_panel.anchor_top = 0.5
+	winner_panel.anchor_right = 0.5
+	winner_panel.anchor_bottom = 0.5
+	winner_panel.offset_left = -190
+	winner_panel.offset_top = -100
+	winner_panel.offset_right = 190
+	winner_panel.offset_bottom = 100
+	add_child(winner_panel)
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 12)
+	winner_panel.add_child(box)
+
+	winner_label = Label.new()
+	winner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	winner_label.add_theme_font_size_override("font_size", 30)
+	box.add_child(winner_label)
+
+	winner_detail_label = Label.new()
+	winner_detail_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	winner_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(winner_detail_label)
+
+	return_button = Button.new()
+	return_button.text = "Return to Lobby"
+	return_button.visible = false
+	return_button.pressed.connect(NetworkManager.return_to_lobby)
+	box.add_child(return_button)
+
+func _draw() -> void:
+	var state: Dictionary = game.get("lootAndLeave", {})
+	if state.is_empty():
+		return
+	var cave: Dictionary = state.get("cave", {})
+	var width := int(cave.get("width", 1))
+	var height := int(cave.get("height", 1))
+	var scale: float = min(size.x / max(1.0, float(width) * TILE_SIZE), max(1.0, size.y - HUD_HEIGHT) / max(1.0, float(height) * TILE_SIZE))
+	var origin: Vector2 = Vector2((size.x - float(width) * TILE_SIZE * scale) * 0.5, HUD_HEIGHT)
+	if shake_timer > 0.0:
+		var strength := 8.0 * (shake_timer / EFFECT_SECONDS)
+		origin += Vector2(sin(Time.get_ticks_msec() * 0.07), cos(Time.get_ticks_msec() * 0.083)) * strength
+
+	_draw_tiles(origin, scale, state)
+	_draw_bags(origin, scale, state)
+	_draw_slimes(origin, scale, state)
+	_draw_players(origin, scale, state)
+	_draw_effects(origin, scale)
+	_draw_hud(state)
+
+func _draw_tiles(origin: Vector2, scale: float, state: Dictionary) -> void:
+	var cave: Dictionary = state.get("cave", {})
+	var width := int(cave.get("width", 0))
+	var height := int(cave.get("height", 0))
+	var tiles: Array = cave.get("tiles", [])
+	for y in range(height):
+		for x in range(width):
+			var tile := int(tiles[y * width + x])
+			var rect := Rect2(origin + Vector2(x, y) * TILE_SIZE * scale, Vector2(TILE_SIZE, TILE_SIZE) * scale)
+			match tile:
+				EMPTY:
+					_draw_empty(rect, x, y)
+				WALL:
+					_draw_wall(rect, x, y)
+				DIRT:
+					_draw_dirt(rect, x, y)
+				ROCK:
+					_draw_rock(rect, state)
+				GEM:
+					_draw_gem(rect, Color(0.76, 0.90, 1.0), Color(0.30, 0.43, 0.80))
+				RUBY:
+					_draw_gem(rect, Color(1.0, 0.38, 0.32), Color(0.74, 0.18, 0.16))
+				EXIT:
+					_draw_exit(rect, bool(state.get("exitUnlocked", false)))
+
+func _draw_empty(rect: Rect2, x: int, y: int) -> void:
+	draw_rect(rect, Color(0.030, 0.046, 0.058))
+	if _variant(x, y, 1) % 3 == 0:
+		draw_rect(Rect2(rect.position + rect.size * 0.22, rect.size * 0.22), Color(0.050, 0.068, 0.078, 0.65))
+
+func _draw_wall(rect: Rect2, x: int, y: int) -> void:
+	var v := _variant(x, y, 2)
+	draw_rect(rect, Color(0.25, 0.22, 0.16))
+	draw_rect(rect.grow(-2), Color(0.50 + float(v % 4) * 0.025, 0.47, 0.35))
+	draw_rect(rect.grow(-2), Color(0.18, 0.16, 0.12), false, 2.0)
+
+func _draw_dirt(rect: Rect2, x: int, y: int) -> void:
+	var v := _variant(x, y, 3)
+	draw_rect(rect, Color(0.25, 0.16, 0.075))
+	draw_rect(rect.grow(-1), Color(0.42, 0.28, 0.13))
+	draw_rect(Rect2(rect.position + Vector2(rect.size.x * 0.12, rect.size.y * 0.14), rect.size * 0.35), Color(0.31, 0.20, 0.09, 0.72))
+	if v % 4 == 0:
+		draw_circle(rect.get_center(), rect.size.x * 0.08, Color(0.55, 0.39, 0.18, 0.7))
+
+func _draw_rock(rect: Rect2, state: Dictionary) -> void:
+	var center := rect.get_center()
+	if int(state.get("tick", 0)) % 8 < 3:
+		draw_circle(center, rect.size.x * 0.46, Color(1.0, 0.72, 0.20, 0.08))
+	var points := PackedVector2Array([
+		center + Vector2(-0.36, -0.23) * rect.size,
+		center + Vector2(-0.12, -0.40) * rect.size,
+		center + Vector2(0.28, -0.34) * rect.size,
+		center + Vector2(0.40, 0.00) * rect.size,
+		center + Vector2(0.20, 0.36) * rect.size,
+		center + Vector2(-0.24, 0.34) * rect.size,
+		center + Vector2(-0.42, 0.04) * rect.size
+	])
+	draw_colored_polygon(points, Color(0.48, 0.48, 0.47))
+	var outline := PackedVector2Array(points)
+	outline.append(points[0])
+	draw_polyline(outline, Color(0.20, 0.20, 0.20), 2.0)
+
+func _draw_gem(rect: Rect2, fill: Color, edge: Color) -> void:
+	var c := rect.get_center()
+	var s := rect.size.x * 0.32
+	var points := PackedVector2Array([c + Vector2(0, -s), c + Vector2(s, 0), c + Vector2(0, s), c + Vector2(-s, 0)])
+	draw_colored_polygon(points, fill)
+	var outline := PackedVector2Array(points)
+	outline.append(points[0])
+	draw_polyline(outline, edge, 2.0)
+
+func _draw_exit(rect: Rect2, unlocked: bool) -> void:
+	var color := Color(0.18, 0.72, 0.32) if unlocked else Color(0.35, 0.18, 0.12)
+	draw_rect(rect.grow(-4), Color(0.06, 0.07, 0.07))
+	draw_rect(rect.grow(-8), color)
+	draw_rect(rect.grow(-4), Color(0.70, 0.70, 0.65), false, 2.0)
+	draw_string(get_theme_default_font(), rect.position + Vector2(5, -3), "EXIT", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE)
+
+func _draw_bags(origin: Vector2, scale: float, state: Dictionary) -> void:
+	for bag in state.get("lootBags", []):
+		var pos := _tile_center(origin, scale, int(bag.get("x", 0)), int(bag.get("y", 0)))
+		var local := str(bag.get("ownerId", "")) == NetworkManager.player_id
+		draw_circle(pos, 17.0 * scale, Color(1.0, 0.78, 0.22, 0.25 if local else 0.12))
+		draw_rect(Rect2(pos + Vector2(-10, -6) * scale, Vector2(20, 16) * scale), Color(0.54, 0.31, 0.12))
+		draw_rect(Rect2(pos + Vector2(-10, -6) * scale, Vector2(20, 16) * scale), Color(0.08, 0.05, 0.03), false, 2.0)
+		if local:
+			draw_string(get_theme_default_font(), pos + Vector2(-18, -22) * scale, "YOURS", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.9, 0.35))
+
+func _draw_slimes(origin: Vector2, scale: float, state: Dictionary) -> void:
+	for slime in state.get("slimes", []):
+		var pos := _tile_center(origin, scale, int(slime.get("x", 0)), int(slime.get("y", 0)))
+		var wobble := sin(float(state.get("tick", 0)) * 0.55) * 2.0 * scale
+		draw_circle(pos + Vector2(-5, 3 + wobble) * scale, 11.0 * scale, Color(0.18, 0.72, 0.22))
+		draw_circle(pos + Vector2(5, 3 + wobble) * scale, 11.0 * scale, Color(0.18, 0.72, 0.22))
+		draw_circle(pos + Vector2(0, -3 + wobble) * scale, 10.0 * scale, Color(0.40, 0.95, 0.38, 0.82))
+		draw_circle(pos + Vector2(-4, -4 + wobble) * scale, 2.5 * scale, Color(0.03, 0.08, 0.03))
+		draw_circle(pos + Vector2(5, -4 + wobble) * scale, 2.5 * scale, Color(0.03, 0.08, 0.03))
+
+func _draw_players(origin: Vector2, scale: float, state: Dictionary) -> void:
+	for player in state.get("players", []):
+		if bool(player.get("out", false)) or bool(player.get("escaped", false)):
+			continue
+		var pos := _tile_center(origin, scale, int(player.get("x", 0)), int(player.get("y", 0)))
+		var is_local := str(player.get("id", "")) == NetworkManager.player_id
+		var color := Color(0.90, 0.86, 0.48) if is_local else Color(0.58, 0.66, 0.82)
+		draw_rect(Rect2(pos + Vector2(-7, 2) * scale, Vector2(14, 16) * scale), Color(0.12, 0.12, 0.11))
+		draw_rect(Rect2(pos + Vector2(-9, -8) * scale, Vector2(18, 11) * scale), Color(0.95, 0.72, 0.52))
+		draw_rect(Rect2(pos + Vector2(-11, -15) * scale, Vector2(22, 7) * scale), color)
+		if is_local:
+			draw_arc(pos, 20.0 * scale, 0.0, TAU, 28, Color(0.35, 0.75, 1.0, 0.55), 2.0)
+			draw_string(get_theme_default_font(), pos + Vector2(-10, -24) * scale, "You", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE)
+
+func _draw_effects(origin: Vector2, scale: float) -> void:
+	for effect in animated_effects:
+		var t := 1.0 - float(effect.get("life", 0.0)) / EFFECT_SECONDS
+		var alpha := 1.0 - t
+		var pos := _tile_center(origin, scale, int(effect.get("x", 0)), int(effect.get("y", 0)))
+		match str(effect.get("type", "")):
+			"gem", "loot_recover", "exit_unlocked":
+				draw_circle(pos, (12.0 + t * 24.0) * scale, Color(0.95, 1.0, 0.65, 0.35 * alpha))
+			"player_hit", "slime_hit":
+				draw_circle(pos, (18.0 + t * 15.0) * scale, Color(1.0, 0.08, 0.04, 0.32 * alpha))
+			"rock_impact", "loot_drop":
+				draw_circle(pos, (12.0 + t * 20.0) * scale, Color(0.64, 0.57, 0.45, 0.35 * alpha))
+
+func _draw_hud(state: Dictionary) -> void:
+	var local: Dictionary = _local_player(state)
+	var seconds_left: float = max(0.0, (float(game.get("endsAt", 0)) - Time.get_unix_time_from_system() * 1000.0) / 1000.0)
+	var status := "Alive"
+	if bool(local.get("out", false)):
+		status = "Out"
+	elif bool(local.get("escaped", false)):
+		status = "Escaped"
+	var exit_text := "Exit open" if bool(state.get("exitUnlocked", false)) else "Exit locked"
+	hud_label.text = "Loot & Leave  L%s  %.0fs  Lives %s  Carry $%s  Bank $%s  %s  %s" % [
+		state.get("level", 1),
+		seconds_left,
+		local.get("lives", 0),
+		local.get("carriedCash", 0),
+		local.get("bankedCash", 0),
+		exit_text,
+		status
+	]
+
+func _send_input() -> void:
+	if winner_panel.visible:
+		return
+	var movement := Vector2.ZERO
+	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
+		movement.x -= 1
+	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
+		movement.x += 1
+	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
+		movement.y -= 1
+	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
+		movement.y += 1
+	if abs(movement.x) > 0.0:
+		movement.y = 0.0
+	NetworkManager.send_loot_and_leave_input(movement)
+
+func _on_game_state_changed(next_game: Dictionary) -> void:
+	_record_event(next_game)
+	game = next_game
+
+func _on_game_over(next_game: Dictionary, winner_id: String) -> void:
+	_record_event(next_game)
+	game = next_game
+	var winner_name := "No winner"
+	for player in NetworkManager.room.players:
+		if player.get("id", "") == winner_id:
+			winner_name = player.get("displayName", "Winner")
+	winner_label.text = "%s wins!" % winner_name
+	var winner_state := _player_by_id(next_game.get("lootAndLeave", {}), winner_id)
+	winner_detail_label.text = "Banked cash: $%s" % winner_state.get("bankedCash", 0)
+	winner_panel.visible = true
+	return_button.visible = NetworkManager.room.host_id == NetworkManager.player_id
+
+func _on_room_state_changed(room: RoomState, _player_id: String) -> void:
+	if room.phase == "lobby":
+		get_tree().change_scene_to_file("res://scenes/Lobby.tscn")
+	else:
+		game = room.game
+
+func _record_event(next_game: Dictionary) -> void:
+	var state: Dictionary = next_game.get("lootAndLeave", {})
+	var event: Dictionary = state.get("lastEvent", {})
+	if event.is_empty():
+		return
+	var key := "%s:%s:%s:%s:%s" % [event.get("type", ""), event.get("x", ""), event.get("y", ""), event.get("playerId", ""), state.get("tick", "")]
+	if key == last_event_key:
+		return
+	last_event_key = key
+	animated_effects.append({
+		"type": event.get("type", ""),
+		"x": int(event.get("x", 0)),
+		"y": int(event.get("y", 0)),
+		"life": EFFECT_SECONDS
+	})
+	if ["player_hit", "slime_hit", "rock_impact"].has(str(event.get("type", ""))):
+		shake_timer = EFFECT_SECONDS
+
+func _update_effects(delta: float) -> void:
+	animated_effects = animated_effects.filter(func(effect: Dictionary) -> bool:
+		effect["life"] = float(effect.get("life", 0.0)) - delta
+		return float(effect["life"]) > 0.0
+	)
+
+func _local_player(state: Dictionary) -> Dictionary:
+	return _player_by_id(state, NetworkManager.player_id)
+
+func _player_by_id(state: Dictionary, player_id: String) -> Dictionary:
+	for player in state.get("players", []):
+		if str(player.get("id", "")) == player_id:
+			return player
+	return {}
+
+func _tile_center(origin: Vector2, scale: float, x: int, y: int) -> Vector2:
+	return origin + Vector2(float(x) + 0.5, float(y) + 0.5) * TILE_SIZE * scale
+
+func _variant(x: int, y: int, salt: int) -> int:
+	return abs(x * 73856093 ^ y * 19349663 ^ salt * 83492791)

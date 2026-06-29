@@ -69,7 +69,7 @@ export class Room {
         this.lastTickAt = now;
         onTick?.();
         if (this.game?.winnerId) onFinished();
-      }, ACT_NATURAL_TICK_MS);
+      }, minigame.tickMs ?? ACT_NATURAL_TICK_MS);
     }
     this.endTimer = setTimeout(onFinished, Math.max(0, this.game.endsAt - Date.now()));
     return this.game;

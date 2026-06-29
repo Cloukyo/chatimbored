@@ -17,7 +17,7 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	var ends_at = NetworkManager.room.game.get("endsAt", 0)
 	if ends_at > 0:
-		var remaining := max(0.0, (float(ends_at) - Time.get_unix_time_from_system() * 1000.0) / 1000.0)
+		var remaining: float = max(0.0, (float(ends_at) - Time.get_unix_time_from_system() * 1000.0) / 1000.0)
 		timer_label.text = "%.1fs" % remaining
 
 func _build_ui() -> void:

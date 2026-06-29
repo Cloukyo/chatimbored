@@ -51,6 +51,19 @@ test("walking moves at crowd-like speed and running moves farther", () => {
   assert.ok(ranX - walkedX > walkedX - startX);
 });
 
+test("tiny movement input inside the deadzone does not move the player", () => {
+  const room = makeRoom();
+  room.game = actNatural.setup(room);
+  const player = room.game.actNatural!.players.find((candidate) => candidate.id === "p1")!;
+  const start = { x: player.x, y: player.y };
+
+  actNatural.handleInput(room, "p1", input({ movement: { x: 0.03, y: -0.05 } }));
+  actNatural.update!(room, 1000);
+
+  assert.equal(player.x, start.x);
+  assert.equal(player.y, start.y);
+});
+
 test("shooting consumes exactly one shot and can kill another player", () => {
   const room = makeRoom();
   room.game = actNatural.setup(room);

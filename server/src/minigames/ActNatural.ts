@@ -24,6 +24,7 @@ const SHOT_WIDTH = 22;
 const SPAWN_X = 80;
 const MIN_Y = 60;
 const MAX_Y = ACT_NATURAL_ARENA_HEIGHT - 60;
+const MOVEMENT_DEADZONE = 0.16;
 
 export const actNatural: Minigame = {
   id: "act_natural",
@@ -66,7 +67,7 @@ export const actNatural: Minigame = {
     player.running = input.run;
     player.x = clamp(player.x, 0, ACT_NATURAL_ARENA_WIDTH);
     player.y = clamp(player.y, MIN_Y, MAX_Y);
-    playerMovement.set(playerId, normalize(input.movement, { x: 0, y: 0 }));
+    playerMovement.set(playerId, normalizeMovement(input.movement));
 
     if (input.shoot && player.shotAvailable) {
       player.shotAvailable = false;
@@ -161,6 +162,12 @@ function isActNaturalInput(input: unknown): input is ActNaturalInput {
 function normalize(vector: Vector2Payload, fallback: Vector2Payload): Vector2Payload {
   const length = Math.hypot(vector.x, vector.y);
   if (!Number.isFinite(length) || length < 0.001) return fallback;
+  return { x: vector.x / length, y: vector.y / length };
+}
+
+function normalizeMovement(vector: Vector2Payload): Vector2Payload {
+  const length = Math.hypot(vector.x, vector.y);
+  if (!Number.isFinite(length) || length < MOVEMENT_DEADZONE) return { x: 0, y: 0 };
   return { x: vector.x / length, y: vector.y / length };
 }
 

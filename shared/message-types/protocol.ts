@@ -63,6 +63,7 @@ export type ActNaturalNpcState = {
   y: number;
   speed: number;
   drift: number;
+  behaviorTimer: number;
 };
 
 export type ActNaturalShotResult = {

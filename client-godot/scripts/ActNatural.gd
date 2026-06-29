@@ -18,6 +18,9 @@ var previous_alive: Dictionary = {}
 var shot_effects: Array[Dictionary] = []
 var death_effects: Array[Dictionary] = []
 var result_label: Label
+var winner_panel: PanelContainer
+var winner_label: Label
+var winner_detail_label: Label
 var return_button: Button
 
 func _ready() -> void:
@@ -59,13 +62,37 @@ func _build_ui() -> void:
 	controls.offset_top = 48
 	add_child(controls)
 
+	winner_panel = PanelContainer.new()
+	winner_panel.visible = false
+	winner_panel.anchor_left = 0.5
+	winner_panel.anchor_top = 0.5
+	winner_panel.anchor_right = 0.5
+	winner_panel.anchor_bottom = 0.5
+	winner_panel.offset_left = -180
+	winner_panel.offset_top = -95
+	winner_panel.offset_right = 180
+	winner_panel.offset_bottom = 95
+	add_child(winner_panel)
+
+	var winner_box := VBoxContainer.new()
+	winner_box.add_theme_constant_override("separation", 12)
+	winner_panel.add_child(winner_box)
+
+	winner_label = Label.new()
+	winner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	winner_label.add_theme_font_size_override("font_size", 30)
+	winner_box.add_child(winner_label)
+
+	winner_detail_label = Label.new()
+	winner_detail_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	winner_detail_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	winner_box.add_child(winner_detail_label)
+
 	return_button = Button.new()
 	return_button.text = "Return to Lobby"
 	return_button.visible = false
-	return_button.offset_left = 18
-	return_button.offset_top = 590
 	return_button.pressed.connect(NetworkManager.return_to_lobby)
-	add_child(return_button)
+	winner_box.add_child(return_button)
 
 func _draw() -> void:
 	var state: Dictionary = game.get("actNatural", {})
@@ -300,7 +327,9 @@ func _on_game_over(next_game: Dictionary, winner_id: String) -> void:
 	for player in NetworkManager.room.players:
 		if player.get("id", "") == winner_id:
 			winner_name = player.get("displayName", "Winner")
-	result_label.text = "%s escaped!" % winner_name
+	winner_label.text = "%s escaped!" % winner_name
+	winner_detail_label.text = "Round over. Host can return everyone to the lobby."
+	winner_panel.visible = true
 	return_button.visible = NetworkManager.room.host_id == NetworkManager.player_id
 
 func _on_room_state_changed(room: RoomState, _player_id: String) -> void:

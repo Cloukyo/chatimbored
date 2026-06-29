@@ -95,11 +95,16 @@ export const actNatural: Minigame = {
     }
 
     for (const npc of room.game.actNatural.npcs) {
+      npc.behaviorTimer -= deltaMs;
+      if (npc.behaviorTimer <= 0) {
+        updateNpcBehavior(npc);
+      }
       npc.x += npc.speed * seconds;
       npc.y = clamp(npc.y + npc.drift * seconds, MIN_Y, MAX_Y);
-      if (npc.x > ACT_NATURAL_ARENA_WIDTH + 30) {
-        npc.x = -20;
-        npc.y = MIN_Y + deterministicNoise(npc.id.length + npc.y) * (MAX_Y - MIN_Y);
+      if (npc.x > ACT_NATURAL_ARENA_WIDTH) {
+        npc.x = ACT_NATURAL_ARENA_WIDTH;
+        npc.speed = 0;
+        npc.drift = 0;
       }
     }
 
@@ -121,13 +126,38 @@ export const actNatural: Minigame = {
 const playerMovement = new Map<string, Vector2Payload>();
 
 function createNpcs(): ActNaturalNpcState[] {
-  return Array.from({ length: ACT_NATURAL_NPC_COUNT }, (_unused, index) => ({
-    id: `npc_${index}`,
-    x: 20 + deterministicNoise(index * 17) * 260,
-    y: MIN_Y + deterministicNoise(index * 31) * (MAX_Y - MIN_Y),
-    speed: ACT_NATURAL_NPC_SPEED + (deterministicNoise(index * 47) - 0.5) * 18,
-    drift: (deterministicNoise(index * 59) - 0.5) * 22,
-  }));
+  return Array.from({ length: ACT_NATURAL_NPC_COUNT }, (_unused, index) => {
+    const npc = {
+      id: `npc_${index}`,
+      x: 20 + deterministicNoise(index * 17) * 260,
+      y: MIN_Y + deterministicNoise(index * 31) * (MAX_Y - MIN_Y),
+      speed: ACT_NATURAL_NPC_SPEED,
+      drift: 0,
+      behaviorTimer: 0,
+    };
+    setNpcBehavior(npc, index);
+    return npc;
+  });
+}
+
+function updateNpcBehavior(npc: ActNaturalNpcState): void {
+  const seed = npc.x * 0.37 + npc.y * 0.11 + npc.behaviorTimer + npc.id.length;
+  setNpcBehavior(npc, seed);
+}
+
+function setNpcBehavior(npc: ActNaturalNpcState, seed: number): void {
+  const roll = deterministicNoise(seed * 73);
+  npc.behaviorTimer = 900 + deterministicNoise(seed * 89) * 2600;
+
+  if (roll < 0.18) {
+    npc.speed = 0;
+    npc.drift = 0;
+    return;
+  }
+
+  npc.speed = ACT_NATURAL_NPC_SPEED + (deterministicNoise(seed * 47) - 0.5) * 26;
+  const verticalRoll = deterministicNoise(seed * 59);
+  npc.drift = verticalRoll < 0.34 ? -24 : verticalRoll > 0.66 ? 24 : 0;
 }
 
 function resolveShot(

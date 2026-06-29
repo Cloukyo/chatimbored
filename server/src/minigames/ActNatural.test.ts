@@ -71,6 +71,27 @@ test("tiny movement input inside the deadzone does not move the player", () => {
   assert.equal(player.y, start.y);
 });
 
+test("npc crowd includes stopped and vertically drifting walkers", () => {
+  const room = makeRoom();
+  room.game = actNatural.setup(room);
+  const npcs = room.game.actNatural!.npcs;
+
+  assert.ok(npcs.some((npc) => npc.speed === 0));
+  assert.ok(npcs.some((npc) => npc.drift !== 0));
+});
+
+test("npcs do not loop back to the left after reaching the end", () => {
+  const room = makeRoom();
+  room.game = actNatural.setup(room);
+  const npc = room.game.actNatural!.npcs[0];
+  npc.x = 1240;
+  npc.y = 200;
+
+  actNatural.update!(room, 1000);
+
+  assert.ok(npc.x >= 1200);
+});
+
 test("shooting consumes exactly one shot and can kill another player", () => {
   const room = makeRoom();
   room.game = actNatural.setup(room);

@@ -1,0 +1,26 @@
+# Godot
+.godot/
+client-godot/.godot/
+client-godot/.import/
+client-godot/imported/
+client-godot/export/
+client-godot/exports/
+client-godot/*.tmp
+client-godot/*.translation
+
+# Node
+node_modules/
+server/node_modules/
+dist/
+server/dist/
+npm-debug.log*
+
+# Environment
+.env
+.env.*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

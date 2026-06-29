@@ -22,6 +22,13 @@ function input(overrides: Partial<ActNaturalInput> = {}): ActNaturalInput {
   };
 }
 
+function moveNpcsAway(room: Room): void {
+  room.game!.actNatural!.npcs.forEach((npc, index) => {
+    npc.x = 1000 + index;
+    npc.y = 40;
+  });
+}
+
 test("setup spawns players, creates a crowd, and exposes a 90 second round", () => {
   const room = makeRoom();
   const game = actNatural.setup(room);
@@ -68,6 +75,7 @@ test("shooting consumes exactly one shot and can kill another player", () => {
   const room = makeRoom();
   room.game = actNatural.setup(room);
   const state = room.game.actNatural!;
+  moveNpcsAway(room);
   const shooter = state.players.find((player) => player.id === "p1")!;
   const target = state.players.find((player) => player.id === "p2")!;
   target.x = shooter.x + 80;
@@ -81,6 +89,44 @@ test("shooting consumes exactly one shot and can kill another player", () => {
   target.alive = true;
   actNatural.handleInput(room, "p1", input({ aim: { x: 1, y: 0 }, shoot: true }));
   assert.equal(target.alive, true);
+});
+
+test("mouse target point can hit a player across the arena", () => {
+  const room = makeRoom();
+  room.game = actNatural.setup(room);
+  const state = room.game.actNatural!;
+  moveNpcsAway(room);
+  const shooter = state.players.find((player) => player.id === "p1")!;
+  const target = state.players.find((player) => player.id === "p2")!;
+  target.x = shooter.x + 700;
+  target.y = shooter.y;
+
+  actNatural.handleInput(room, "p1", input({ shoot: true, targetPoint: { x: target.x + 120, y: target.y } }));
+
+  assert.equal(shooter.shotAvailable, false);
+  assert.equal(target.alive, false);
+  assert.equal(state.lastShot?.hitType, "player");
+  assert.equal(state.lastShot?.targetId, "p2");
+});
+
+test("npc on the target line blocks the shot before a player", () => {
+  const room = makeRoom();
+  room.game = actNatural.setup(room);
+  const state = room.game.actNatural!;
+  moveNpcsAway(room);
+  const shooter = state.players.find((player) => player.id === "p1")!;
+  const target = state.players.find((player) => player.id === "p2")!;
+  target.x = shooter.x + 500;
+  target.y = shooter.y;
+  state.npcs[0].x = shooter.x + 160;
+  state.npcs[0].y = shooter.y;
+
+  actNatural.handleInput(room, "p1", input({ shoot: true, targetPoint: { x: target.x + 100, y: target.y } }));
+
+  assert.equal(shooter.shotAvailable, false);
+  assert.equal(target.alive, true);
+  assert.equal(state.lastShot?.hitType, "npc");
+  assert.equal(state.lastShot?.targetId, state.npcs[0].id);
 });
 
 test("first living player to reach the exit wins and ends the room", () => {

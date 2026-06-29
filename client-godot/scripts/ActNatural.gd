@@ -4,14 +4,15 @@ const INPUT_INTERVAL: float = 0.05
 const HUD_HEIGHT: float = 82.0
 const LEFT_STICK_DEADZONE: float = 0.22
 const RIGHT_STICK_DEADZONE: float = 0.25
-const SHOT_RANGE: float = 260.0
 const EFFECT_SECONDS: float = 0.18
 
 var game: Dictionary = {}
 var local_state: Dictionary = {}
 var send_timer: float = 0.0
 var shot_pressed: bool = false
+var pending_mouse_target = null
 var last_aim: Vector2 = Vector2.RIGHT
+var last_shot_key: String = ""
 var display_positions: Dictionary = {}
 var previous_alive: Dictionary = {}
 var shot_effects: Array[Dictionary] = []
@@ -35,12 +36,15 @@ func _exit_tree() -> void:
 func _process(delta: float) -> void:
 	send_timer -= delta
 	_update_effects(delta)
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-		shot_pressed = true
 	if send_timer <= 0.0:
 		send_timer = INPUT_INTERVAL
 		_send_input()
 	queue_redraw()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		shot_pressed = true
+		pending_mouse_target = _mouse_world_point()
 
 func _build_ui() -> void:
 	result_label = Label.new()
@@ -166,12 +170,10 @@ func _send_input() -> void:
 			aim = stick_aim.normalized()
 		running = running or Input.get_joy_axis(pad, JOY_AXIS_TRIGGER_RIGHT) > 0.45 or Input.is_joy_button_pressed(pad, JOY_BUTTON_B)
 
-	if shot_pressed and local_state.get("shotAvailable", false):
-		_add_local_shot_effect(aim)
-
 	last_aim = aim
-	NetworkManager.send_act_natural_input(movement, aim, shot_pressed, running)
+	NetworkManager.send_act_natural_input(movement, aim, shot_pressed, running, pending_mouse_target)
 	shot_pressed = false
+	pending_mouse_target = null
 
 func _keyboard_movement() -> Vector2:
 	var movement: Vector2 = Vector2.ZERO
@@ -212,12 +214,13 @@ func _mouse_aim() -> Vector2:
 	var aim: Vector2 = get_local_mouse_position() - local_pos
 	return aim.normalized() if aim.length() > 0.001 else last_aim
 
-func _add_local_shot_effect(aim: Vector2) -> void:
-	if local_state.is_empty():
-		return
-	var start: Vector2 = Vector2(float(local_state.get("x", 0)), float(local_state.get("y", 0)))
-	var end: Vector2 = start + aim.normalized() * SHOT_RANGE
-	shot_effects.append({"start": start, "end": end, "life": EFFECT_SECONDS})
+func _mouse_world_point() -> Vector2:
+	var state: Dictionary = game.get("actNatural", {})
+	var arena: Dictionary = state.get("arena", {})
+	var arena_size: Vector2 = Vector2(float(arena.get("width", 1200)), float(arena.get("height", 620)))
+	var scale: float = min(size.x / arena_size.x, max(1.0, size.y - HUD_HEIGHT) / arena_size.y)
+	var origin: Vector2 = Vector2((size.x - arena_size.x * scale) * 0.5, HUD_HEIGHT)
+	return (get_local_mouse_position() - origin) / scale
 
 func _update_effects(delta: float) -> void:
 	shot_effects = shot_effects.filter(func(effect: Dictionary) -> bool:
@@ -259,12 +262,37 @@ func _record_death_transitions(next_game: Dictionary) -> void:
 			})
 		previous_alive[id] = alive
 
+func _record_shot_transition(next_game: Dictionary) -> void:
+	var state: Dictionary = next_game.get("actNatural", {})
+	var shot: Dictionary = state.get("lastShot", {})
+	if shot.is_empty():
+		return
+	var start_dict: Dictionary = shot.get("start", {})
+	var end_dict: Dictionary = shot.get("end", {})
+	var key: String = "%s:%s:%s:%s:%s" % [
+		shot.get("shooterId", ""),
+		start_dict.get("x", 0),
+		start_dict.get("y", 0),
+		end_dict.get("x", 0),
+		end_dict.get("y", 0)
+	]
+	if key == last_shot_key:
+		return
+	last_shot_key = key
+	shot_effects.append({
+		"start": Vector2(float(start_dict.get("x", 0)), float(start_dict.get("y", 0))),
+		"end": Vector2(float(end_dict.get("x", 0)), float(end_dict.get("y", 0))),
+		"life": EFFECT_SECONDS
+	})
+
 func _on_game_state_changed(next_game: Dictionary) -> void:
+	_record_shot_transition(next_game)
 	_record_death_transitions(next_game)
 	game = next_game
 	_refresh_local_state()
 
 func _on_game_over(next_game: Dictionary, winner_id: String) -> void:
+	_record_shot_transition(next_game)
 	_record_death_transitions(next_game)
 	game = next_game
 	_refresh_local_state()

@@ -12,6 +12,7 @@ import type {
   ActNaturalInput,
   ActNaturalNpcState,
   ActNaturalPlayerState,
+  ActNaturalShotResult,
   GameSnapshot,
   Vector2Payload,
 } from "../../../shared/message-types/protocol.js";
@@ -19,12 +20,12 @@ import type { Room } from "../rooms/Room.js";
 import type { Minigame } from "./Minigame.js";
 
 const PLAYER_RADIUS = 16;
-const SHOT_RANGE = 260;
 const SHOT_WIDTH = 22;
 const SPAWN_X = 80;
 const MIN_Y = 60;
 const MAX_Y = ACT_NATURAL_ARENA_HEIGHT - 60;
 const MOVEMENT_DEADZONE = 0.16;
+const NPC_RADIUS = 15;
 
 export const actNatural: Minigame = {
   id: "act_natural",
@@ -71,7 +72,7 @@ export const actNatural: Minigame = {
 
     if (input.shoot && player.shotAvailable) {
       player.shotAvailable = false;
-      resolveShot(room.game.actNatural.players, player);
+      room.game.actNatural.lastShot = resolveShot(room.game.actNatural.players, room.game.actNatural.npcs, player, input);
     }
 
     return room.game;
@@ -129,26 +130,78 @@ function createNpcs(): ActNaturalNpcState[] {
   }));
 }
 
-function resolveShot(players: ActNaturalPlayerState[], shooter: ActNaturalPlayerState): void {
-  let bestTarget: ActNaturalPlayerState | undefined;
+function resolveShot(
+  players: ActNaturalPlayerState[],
+  npcs: ActNaturalNpcState[],
+  shooter: ActNaturalPlayerState,
+  input: ActNaturalInput,
+): ActNaturalShotResult {
+  const start = { x: shooter.x, y: shooter.y };
+  const end = shotEnd(start, shooter, input);
+  let bestHit: ActNaturalShotResult = { shooterId: shooter.id, start, end, hitType: "miss" };
   let bestDistance = Number.POSITIVE_INFINITY;
-  const aim = normalize(shooter.aim, { x: 1, y: 0 });
 
-  // A shot is a narrow server-side ray. Hitting empty space or an NPC still spends it.
   for (const target of players) {
     if (target.id === shooter.id || !target.alive) continue;
-    const dx = target.x - shooter.x;
-    const dy = target.y - shooter.y;
-    const forwardDistance = dx * aim.x + dy * aim.y;
-    if (forwardDistance < 0 || forwardDistance > SHOT_RANGE) continue;
-    const sidewaysDistance = Math.abs(dx * -aim.y + dy * aim.x);
-    if (sidewaysDistance <= SHOT_WIDTH + PLAYER_RADIUS && forwardDistance < bestDistance) {
-      bestTarget = target;
-      bestDistance = forwardDistance;
+    const hit = segmentHit(start, end, target, SHOT_WIDTH + PLAYER_RADIUS);
+    if (hit && hit.distance < bestDistance) {
+      bestDistance = hit.distance;
+      bestHit = { shooterId: shooter.id, start, end: hit.point, hitType: "player", targetId: target.id };
     }
   }
 
-  if (bestTarget) bestTarget.alive = false;
+  for (const npc of npcs) {
+    const hit = segmentHit(start, end, npc, SHOT_WIDTH + NPC_RADIUS);
+    if (hit && hit.distance < bestDistance) {
+      bestDistance = hit.distance;
+      bestHit = { shooterId: shooter.id, start, end: hit.point, hitType: "npc", targetId: npc.id };
+    }
+  }
+
+  if (bestHit.hitType === "player" && bestHit.targetId) {
+    const target = players.find((player) => player.id === bestHit.targetId);
+    if (target) target.alive = false;
+  }
+
+  return bestHit;
+}
+
+function shotEnd(start: Vector2Payload, shooter: ActNaturalPlayerState, input: ActNaturalInput): Vector2Payload {
+  if (input.targetPoint) {
+    return {
+      x: clamp(input.targetPoint.x, 0, ACT_NATURAL_ARENA_WIDTH),
+      y: clamp(input.targetPoint.y, 0, ACT_NATURAL_ARENA_HEIGHT),
+    };
+  }
+
+  const aim = normalize(input.aim, shooter.aim);
+  const range = Math.hypot(ACT_NATURAL_ARENA_WIDTH, ACT_NATURAL_ARENA_HEIGHT);
+  return {
+    x: clamp(start.x + aim.x * range, 0, ACT_NATURAL_ARENA_WIDTH),
+    y: clamp(start.y + aim.y * range, 0, ACT_NATURAL_ARENA_HEIGHT),
+  };
+}
+
+function segmentHit(
+  start: Vector2Payload,
+  end: Vector2Payload,
+  target: { x: number; y: number },
+  radius: number,
+): { distance: number; point: Vector2Payload } | undefined {
+  const segment = { x: end.x - start.x, y: end.y - start.y };
+  const lengthSquared = segment.x * segment.x + segment.y * segment.y;
+  if (lengthSquared < 0.001) return undefined;
+
+  const toTarget = { x: target.x - start.x, y: target.y - start.y };
+  const t = clamp((toTarget.x * segment.x + toTarget.y * segment.y) / lengthSquared, 0, 1);
+  const closest = { x: start.x + segment.x * t, y: start.y + segment.y * t };
+  const distanceToLine = Math.hypot(target.x - closest.x, target.y - closest.y);
+  if (distanceToLine > radius) return undefined;
+
+  return {
+    distance: Math.hypot(closest.x - start.x, closest.y - start.y),
+    point: closest,
+  };
 }
 
 function closestLivingPlayer(players: ActNaturalPlayerState[]): string | undefined {

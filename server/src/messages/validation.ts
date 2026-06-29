@@ -44,6 +44,7 @@ function readActNaturalInput(value: unknown): PlayerInputPayload {
   return {
     movement: readVector(input.movement),
     aim: readVector(input.aim),
+    targetPoint: readOptionalPoint(input.targetPoint),
     shoot: input.shoot === true,
     run: input.run === true,
   };
@@ -61,6 +62,15 @@ function readVector(value: unknown): { x: number; y: number } {
 function clampUnit(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(-1, Math.min(1, value));
+}
+
+function readOptionalPoint(value: unknown): { x: number; y: number } | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const point = value as Record<string, unknown>;
+  const x = typeof point.x === "number" ? point.x : Number.NaN;
+  const y = typeof point.y === "number" ? point.y : Number.NaN;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+  return { x, y };
 }
 
 function readDisplayName(value: unknown): string {

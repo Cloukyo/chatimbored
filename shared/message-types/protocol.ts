@@ -65,15 +65,25 @@ export type ActNaturalNpcState = {
   drift: number;
 };
 
+export type ActNaturalShotResult = {
+  shooterId: string;
+  start: Vector2Payload;
+  end: Vector2Payload;
+  hitType: "player" | "npc" | "miss";
+  targetId?: string;
+};
+
 export type ActNaturalState = {
   arena: { width: number; height: number; exitX: number };
   players: ActNaturalPlayerState[];
   npcs: ActNaturalNpcState[];
+  lastShot?: ActNaturalShotResult;
 };
 
 export type ActNaturalInput = {
   movement: Vector2Payload;
   aim: Vector2Payload;
+  targetPoint?: Vector2Payload;
   shoot: boolean;
   run: boolean;
 };

@@ -124,6 +124,7 @@ export type LootAndLeaveBagState = {
 export type LootAndLeaveEvent = {
   type:
     | "gem"
+    | "dig"
     | "loot_drop"
     | "loot_recover"
     | "player_hit"

@@ -17,6 +17,7 @@ var game: Dictionary = {}
 var send_timer := 0.0
 var last_event_key := ""
 var animated_effects: Array[Dictionary] = []
+var display_positions: Dictionary = {}
 var shake_timer := 0.0
 var winner_panel: PanelContainer
 var winner_label: Label
@@ -197,7 +198,7 @@ func _draw_bags(origin: Vector2, scale: float, state: Dictionary) -> void:
 
 func _draw_slimes(origin: Vector2, scale: float, state: Dictionary) -> void:
 	for slime in state.get("slimes", []):
-		var pos := _tile_center(origin, scale, int(slime.get("x", 0)), int(slime.get("y", 0)))
+		var pos: Vector2 = _smoothed_tile_center(origin, scale, "slime_%s" % str(slime.get("id", "")), int(slime.get("x", 0)), int(slime.get("y", 0)))
 		var wobble := sin(float(state.get("tick", 0)) * 0.55) * 2.0 * scale
 		draw_circle(pos + Vector2(-5, 3 + wobble) * scale, 11.0 * scale, Color(0.18, 0.72, 0.22))
 		draw_circle(pos + Vector2(5, 3 + wobble) * scale, 11.0 * scale, Color(0.18, 0.72, 0.22))
@@ -209,7 +210,7 @@ func _draw_players(origin: Vector2, scale: float, state: Dictionary) -> void:
 	for player in state.get("players", []):
 		if bool(player.get("out", false)) or bool(player.get("escaped", false)):
 			continue
-		var pos := _tile_center(origin, scale, int(player.get("x", 0)), int(player.get("y", 0)))
+		var pos: Vector2 = _smoothed_tile_center(origin, scale, "player_%s" % str(player.get("id", "")), int(player.get("x", 0)), int(player.get("y", 0)))
 		var is_local := str(player.get("id", "")) == NetworkManager.player_id
 		var color := Color(0.90, 0.86, 0.48) if is_local else Color(0.58, 0.66, 0.82)
 		draw_rect(Rect2(pos + Vector2(-7, 2) * scale, Vector2(14, 16) * scale), Color(0.12, 0.12, 0.11))
@@ -227,6 +228,8 @@ func _draw_effects(origin: Vector2, scale: float) -> void:
 		match str(effect.get("type", "")):
 			"gem", "loot_recover", "exit_unlocked":
 				draw_circle(pos, (12.0 + t * 24.0) * scale, Color(0.95, 1.0, 0.65, 0.35 * alpha))
+			"dig":
+				draw_circle(pos, (8.0 + t * 12.0) * scale, Color(0.42, 0.28, 0.13, 0.30 * alpha))
 			"player_hit", "slime_hit":
 				draw_circle(pos, (18.0 + t * 15.0) * scale, Color(1.0, 0.08, 0.04, 0.32 * alpha))
 			"rock_impact", "loot_drop":
@@ -325,6 +328,15 @@ func _player_by_id(state: Dictionary, player_id: String) -> Dictionary:
 
 func _tile_center(origin: Vector2, scale: float, x: int, y: int) -> Vector2:
 	return origin + Vector2(float(x) + 0.5, float(y) + 0.5) * TILE_SIZE * scale
+
+func _smoothed_tile_center(origin: Vector2, scale: float, key: String, x: int, y: int) -> Vector2:
+	var target := Vector2(float(x), float(y))
+	if not display_positions.has(key):
+		display_positions[key] = target
+	var current: Vector2 = display_positions[key]
+	current = current.lerp(target, 0.42)
+	display_positions[key] = current
+	return origin + (current + Vector2(0.5, 0.5)) * TILE_SIZE * scale
 
 func _variant(x: int, y: int, salt: int) -> int:
 	return abs(x * 73856093 ^ y * 19349663 ^ salt * 83492791)

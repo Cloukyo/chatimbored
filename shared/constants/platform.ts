@@ -13,10 +13,10 @@ export const ACT_NATURAL_WALK_SPEED = 70;
 export const ACT_NATURAL_RUN_SPEED = 145;
 export const ACT_NATURAL_NPC_SPEED = 58;
 export const LOOT_AND_LEAVE_DURATION_MS = 10 * 60_000;
-export const LOOT_AND_LEAVE_TICK_MS = 50;
+export const LOOT_AND_LEAVE_TICK_MS = 45;
 export const LOOT_AND_LEAVE_STARTING_LIVES = 3;
-export const LOOT_AND_LEAVE_BASE_WIDTH = 30;
-export const LOOT_AND_LEAVE_HEIGHT = 20;
+export const LOOT_AND_LEAVE_BASE_WIDTH = 40;
+export const LOOT_AND_LEAVE_HEIGHT = 23;
 export const LOOT_AND_LEAVE_MAX_PLAYERS = 4;
 
 export const LOOT_AND_LEAVE_TILES = {

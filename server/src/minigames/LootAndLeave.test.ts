@@ -71,6 +71,8 @@ test("setup creates a level one cave for two to four players with one slime", ()
   assert.equal(game.players.length, 3);
   assert.equal(game.players.every((player) => player.lives === 3), true);
   assert.equal(game.slimes.length, 1);
+  assert.equal(game.cave.width, 44);
+  assert.equal(game.cave.height, 23);
   assert.ok(game.cave.tiles.length === game.cave.width * game.cave.height);
   assert.ok(game.exitUnlockThreshold > 0);
 });
@@ -108,9 +110,27 @@ test("movement enters empty tiles and digging clears dirt with a short cooldown"
   lootAndLeave.update!(room, 50);
   assert.equal(game.players[0].x, 7);
   assert.equal(getTile(game.cave, 7, 5), 0);
+  assert.equal(game.lastEvent?.type, "dig");
 
   lootAndLeave.update!(room, 50);
   assert.equal(game.players[0].x, 7);
+});
+
+test("falling rocks can roll sideways off supported obstacles", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 2, 2);
+  setTile(game.cave, 10, 6, 3);
+  setTile(game.cave, 10, 7, 1);
+  setTile(game.cave, 9, 6, 0);
+  setTile(game.cave, 9, 7, 0);
+  setTile(game.cave, 11, 6, 1);
+  setTile(game.cave, 11, 7, 1);
+
+  lootAndLeave.update!(room, 50);
+
+  assert.equal(getTile(game.cave, 10, 6), 0);
+  assert.equal(getTile(game.cave, 9, 6), 3);
 });
 
 test("gem pickup adds carried cash and unlocking exit depends on collected gems", () => {
@@ -154,7 +174,7 @@ test("death drops carried cash into an ownable loot bag and resets carried cash"
   setTile(game.cave, 5, 4, 0);
   setTile(game.cave, 5, 5, 0);
 
-  for (let i = 0; i < 10; i += 1) lootAndLeave.update!(room, 50);
+  for (let i = 0; i < 5; i += 1) lootAndLeave.update!(room, 50);
 
   assert.equal(game.players[0].lives, 2);
   assert.equal(game.players[0].carriedCash, 0);

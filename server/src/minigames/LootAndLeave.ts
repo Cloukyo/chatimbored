@@ -63,7 +63,7 @@ export const lootAndLeave: Minigame = {
     const game = room.game?.lootAndLeave;
     if (!game || room.game?.winnerId) return room.game!;
 
-    const ticks = Math.max(1, Math.floor(deltaMs / 50));
+    const ticks = Math.max(1, Math.floor(deltaMs / LOOT_AND_LEAVE_TICK_MS));
     for (let i = 0; i < ticks && !room.game?.winnerId; i += 1) {
       step(room, game);
     }
@@ -141,7 +141,7 @@ function tryMove(game: LootAndLeaveState, player: LootAndLeavePlayerState, direc
   if (tile === T.DIRT) {
     setTile(game, target.x, target.y, T.EMPTY);
     player.moveCooldownTicks = 1;
-    game.lastEvent = event("rock_impact", "Digging through dirt.", target.x, target.y, player.id);
+    game.lastEvent = event("dig", "Digging through dirt.", target.x, target.y, player.id);
   } else if (tile === T.GEM || tile === T.RUBY) {
     setTile(game, target.x, target.y, T.EMPTY);
     const cash = tile === T.RUBY ? RUBY_CASH : GEM_CASH;
@@ -189,9 +189,31 @@ function applyGravity(game: LootAndLeaveState): void {
         if (isFalling) game.lastEvent = event("rock_impact", "Rock landed.", x, y);
         delete rock.rockWobbleTicks[key];
         delete rock.fallingRocks[key];
+        tryRollRock(game, x, y, belowTile, moved);
       }
     }
   }
+}
+
+function tryRollRock(game: LootAndLeaveState, x: number, y: number, belowTile: number, moved: Set<string>): void {
+  if (!canRollOff(belowTile)) return;
+  const directions = (game.seed + game.tick + x + y) % 2 === 0 ? [1, -1] : [-1, 1];
+  for (const dx of directions) {
+    const side = { x: x + dx, y };
+    const diagonal = { x: x + dx, y: y + 1 };
+    if (isClearForRock(game, side.x, side.y) && isClearForRock(game, diagonal.x, diagonal.y)) {
+      moveRock(game, x, y, side.x, side.y, true, moved);
+      return;
+    }
+  }
+}
+
+function canRollOff(tile: number): boolean {
+  return tile === T.ROCK || tile === T.GEM || tile === T.RUBY || tile === T.WALL || tile === T.DIRT;
+}
+
+function isClearForRock(game: LootAndLeaveState, x: number, y: number): boolean {
+  return getTile(game, x, y) === T.EMPTY && !playerAt(game, x, y) && !slimeAt(game, x, y);
 }
 
 function moveRock(
@@ -296,7 +318,7 @@ function createLevel(
   previousPlayers: LootAndLeavePlayerState[] = [],
 ): LootAndLeaveState {
   const rng = mulberry32(seed + level * 101);
-  const width = LOOT_AND_LEAVE_BASE_WIDTH + Math.max(0, playerIds.length - 2) * 2;
+  const width = LOOT_AND_LEAVE_BASE_WIDTH + Math.max(0, playerIds.length - 2) * 4;
   const height = LOOT_AND_LEAVE_HEIGHT;
   const cave: LootAndLeaveState["cave"] = { width, height, tiles: Array.from({ length: width * height }, () => T.DIRT) };
   const set = (x: number, y: number, tile: number) => {

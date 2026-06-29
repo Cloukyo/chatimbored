@@ -77,6 +77,33 @@ test("setup creates a level one cave for two to four players with one slime", ()
   assert.ok(game.exitUnlockThreshold > 0);
 });
 
+test("players spawn near the middle of the cave", () => {
+  const room = setupRoom(4);
+  const game = state(room);
+  const centerX = Math.floor(game.cave.width / 2);
+  const centerY = Math.floor(game.cave.height / 2);
+
+  for (const player of game.players) {
+    assert.ok(Math.abs(player.spawnX - centerX) <= 1);
+    assert.ok(Math.abs(player.spawnY - centerY) <= 1);
+  }
+});
+
+test("exit is placed in a random corner instead of a fixed right-side lane", () => {
+  const corners = new Set<string>();
+
+  for (let i = 0; i < 30; i += 1) {
+    const room = setupRoom();
+    const game = state(room);
+    const nearLeftOrRight = game.exit.x <= 5 || game.exit.x >= game.cave.width - 6;
+    const nearTopOrBottom = game.exit.y <= 5 || game.exit.y >= game.cave.height - 6;
+    assert.equal(nearLeftOrRight && nearTopOrBottom, true);
+    corners.add(`${game.exit.x < game.cave.width / 2 ? "L" : "R"}${game.exit.y < game.cave.height / 2 ? "T" : "B"}`);
+  }
+
+  assert.ok(corners.size > 1);
+});
+
 test("later levels increase danger with more rocks and slimes", () => {
   const room = setupRoom();
   const first = state(room);

@@ -4,6 +4,8 @@ const INPUT_INTERVAL := 0.05
 const TILE_SIZE := 34.0
 const HUD_HEIGHT := 86.0
 const EFFECT_SECONDS := 0.32
+const VISION_FULL_TILES := 2.5
+const VISION_RADIUS_TILES := 6.5
 
 const EMPTY := 0
 const WALL := 1
@@ -25,12 +27,14 @@ var winner_detail_label: Label
 var return_button: Button
 var hud_label: Label
 var controls_label: Label
+var sfx_players: Dictionary = {}
 
 func _ready() -> void:
 	NetworkManager.room_state_changed.connect(_on_room_state_changed)
 	NetworkManager.game_state_changed.connect(_on_game_state_changed)
 	NetworkManager.game_over.connect(_on_game_over)
 	_build_ui()
+	_build_sfx()
 	game = NetworkManager.room.game
 	queue_redraw()
 
@@ -106,7 +110,26 @@ func _draw() -> void:
 	_draw_slimes(origin, scale, state)
 	_draw_players(origin, scale, state)
 	_draw_effects(origin, scale)
+	_draw_darkness(origin, scale, state)
 	_draw_hud(state)
+
+func _build_sfx() -> void:
+	var sounds := {
+		"dig": "res://assets/sfx/dig_thonk.wav",
+		"gem": "res://assets/sfx/gem_clink.wav",
+		"loot_recover": "res://assets/sfx/gem_clink.wav",
+		"exit_unlocked": "res://assets/sfx/gem_clink.wav",
+		"rock_impact": "res://assets/sfx/rock_boom.wav",
+		"player_hit": "res://assets/sfx/rock_boom.wav",
+		"slime_hit": "res://assets/sfx/rock_boom.wav",
+		"earthquake": "res://assets/sfx/earthquake_warning.wav"
+	}
+	for key in sounds.keys():
+		var player := AudioStreamPlayer.new()
+		player.stream = load(str(sounds[key]))
+		player.volume_db = -8.0
+		add_child(player)
+		sfx_players[key] = player
 
 func _draw_tiles(origin: Vector2, scale: float, state: Dictionary) -> void:
 	var cave: Dictionary = state.get("cave", {})
@@ -131,7 +154,10 @@ func _draw_tiles(origin: Vector2, scale: float, state: Dictionary) -> void:
 				RUBY:
 					_draw_gem(rect, Color(1.0, 0.38, 0.32), Color(0.74, 0.18, 0.16))
 				EXIT:
-					_draw_exit(rect, bool(state.get("exitUnlocked", false)))
+					if bool(state.get("exitUnlocked", false)) or _vision_strength(state, x, y) > 0.05:
+						_draw_exit(rect, bool(state.get("exitUnlocked", false)))
+					else:
+						_draw_empty(rect, x, y)
 
 func _draw_empty(rect: Rect2, x: int, y: int) -> void:
 	draw_rect(rect, Color(0.030, 0.046, 0.058))
@@ -235,6 +261,17 @@ func _draw_effects(origin: Vector2, scale: float) -> void:
 			"rock_impact", "loot_drop":
 				draw_circle(pos, (12.0 + t * 20.0) * scale, Color(0.64, 0.57, 0.45, 0.35 * alpha))
 
+func _draw_darkness(origin: Vector2, scale: float, state: Dictionary) -> void:
+	var cave: Dictionary = state.get("cave", {})
+	var width := int(cave.get("width", 0))
+	var height := int(cave.get("height", 0))
+	for y in range(height):
+		for x in range(width):
+			var strength := _vision_strength(state, x, y)
+			if strength < 0.995:
+				var rect := Rect2(origin + Vector2(x, y) * TILE_SIZE * scale, Vector2(TILE_SIZE, TILE_SIZE) * scale)
+				draw_rect(rect, Color(0.0, 0.0, 0.0, lerpf(0.96, 0.0, strength)))
+
 func _draw_hud(state: Dictionary) -> void:
 	var local: Dictionary = _local_player(state)
 	var seconds_left: float = max(0.0, (float(game.get("endsAt", 0)) - Time.get_unix_time_from_system() * 1000.0) / 1000.0)
@@ -310,6 +347,7 @@ func _record_event(next_game: Dictionary) -> void:
 	})
 	if ["player_hit", "slime_hit", "rock_impact"].has(str(event.get("type", ""))):
 		shake_timer = EFFECT_SECONDS
+	_play_event_sound(str(event.get("type", "")), str(event.get("message", "")))
 
 func _update_effects(delta: float) -> void:
 	animated_effects = animated_effects.filter(func(effect: Dictionary) -> bool:
@@ -328,6 +366,29 @@ func _player_by_id(state: Dictionary, player_id: String) -> Dictionary:
 
 func _tile_center(origin: Vector2, scale: float, x: int, y: int) -> Vector2:
 	return origin + Vector2(float(x) + 0.5, float(y) + 0.5) * TILE_SIZE * scale
+
+func _vision_strength(state: Dictionary, x: int, y: int) -> float:
+	var local := _local_player(state)
+	if local.is_empty() or bool(local.get("out", false)) or bool(local.get("escaped", false)):
+		return 1.0
+	var dx := float(x) + 0.5 - float(local.get("x", 0))
+	var dy := float(y) + 0.5 - float(local.get("y", 0))
+	var distance := Vector2(dx, dy).length()
+	if distance <= VISION_FULL_TILES:
+		return 1.0
+	if distance >= VISION_RADIUS_TILES:
+		return 0.0
+	return clampf(1.0 - ((distance - VISION_FULL_TILES) / (VISION_RADIUS_TILES - VISION_FULL_TILES)), 0.0, 1.0)
+
+func _play_event_sound(event_type: String, message: String) -> void:
+	var key := event_type
+	if message.contains("trembles"):
+		key = "earthquake"
+	if not sfx_players.has(key):
+		return
+	var player: AudioStreamPlayer = sfx_players[key]
+	player.stop()
+	player.play()
 
 func _smoothed_tile_center(origin: Vector2, scale: float, key: String, x: int, y: int) -> Vector2:
 	var target := Vector2(float(x), float(y))

@@ -331,14 +331,11 @@ function createLevel(
     }
   }
 
-  const spawn = { x: 3, y: Math.floor(height / 2) };
-  const exit = { x: width - 4, y: Math.floor(height / 2) };
+  const spawn = { x: Math.floor(width / 2), y: Math.floor(height / 2) };
+  const exit = chooseCornerExit(rng, width, height);
   carveRoom(cave, spawn.x, spawn.y, 2, 1);
   carveRoom(cave, exit.x, exit.y, 2, 1);
-  for (let x = spawn.x; x <= exit.x; x += 1) {
-    set(x, spawn.y, T.EMPTY);
-    set(x, spawn.y + 1, T.EMPTY);
-  }
+  carveTunnel(cave, spawn, exit);
   set(exit.x, exit.y, T.EXIT);
 
   const gemTarget = 12 + level * 4 + playerIds.length * 3;
@@ -350,8 +347,8 @@ function createLevel(
 
   const players = playerIds.map((id, index) => {
     const previous = previousPlayers.find((candidate) => candidate.id === id);
-    const x = spawn.x;
-    const y = spawn.y + (index % 2);
+    const x = spawn.x + (index % 2);
+    const y = spawn.y + Math.floor(index / 2);
     return {
       id,
       x,
@@ -392,6 +389,41 @@ function createLevel(
     message: `Level ${level}. Grab loot and find the exit.`,
     lastEvent: event("level_start", `Level ${level}.`),
   };
+}
+
+function chooseCornerExit(rng: () => number, width: number, height: number): { x: number; y: number } {
+  const corners = [
+    { x: 4, y: 4 },
+    { x: width - 5, y: 4 },
+    { x: 4, y: height - 5 },
+    { x: width - 5, y: height - 5 },
+  ];
+  return corners[Math.floor(rng() * corners.length)]!;
+}
+
+function carveTunnel(cave: LootAndLeaveState["cave"], from: { x: number; y: number }, to: { x: number; y: number }): void {
+  const pos = { ...from };
+  while (pos.x !== to.x) {
+    pos.x += Math.sign(to.x - pos.x);
+    clearTunnelCell(cave, pos.x, pos.y);
+  }
+  while (pos.y !== to.y) {
+    pos.y += Math.sign(to.y - pos.y);
+    clearTunnelCell(cave, pos.x, pos.y);
+  }
+}
+
+function clearTunnelCell(cave: LootAndLeaveState["cave"], x: number, y: number): void {
+  for (const offset of [
+    { x: 0, y: 0 },
+    { x: 0, y: 1 },
+  ]) {
+    const px = x + offset.x;
+    const py = y + offset.y;
+    if (px > 1 && py > 1 && px < cave.width - 2 && py < cave.height - 2) {
+      cave.tiles[py * cave.width + px] = T.EMPTY;
+    }
+  }
 }
 
 function placeTiles(

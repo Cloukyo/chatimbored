@@ -161,6 +161,7 @@ export type LootAndLeaveState = {
 
 export type LootAndLeaveInput = {
   movement: Vector2Payload;
+  sequence?: number;
 };
 
 export type PlayerInputPayload = "PRESS" | ActNaturalInput | LootAndLeaveInput;

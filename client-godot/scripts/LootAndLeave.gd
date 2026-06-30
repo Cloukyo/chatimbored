@@ -1,6 +1,6 @@
 extends Control
 
-const INPUT_INTERVAL := 0.05
+const INPUT_REPEAT_INTERVAL := 0.18
 const TILE_SIZE := 34.0
 const HUD_HEIGHT := 86.0
 const EFFECT_SECONDS := 0.32
@@ -16,7 +16,9 @@ const EXIT := 5
 const RUBY := 6
 
 var game: Dictionary = {}
-var send_timer := 0.0
+var held_direction := Vector2.ZERO
+var repeat_timer := 0.0
+var input_sequence := 0
 var last_event_key := ""
 var animated_effects: Array[Dictionary] = []
 var display_positions: Dictionary = {}
@@ -39,12 +41,9 @@ func _ready() -> void:
 	queue_redraw()
 
 func _process(delta: float) -> void:
-	send_timer -= delta
 	_update_effects(delta)
 	shake_timer = max(0.0, shake_timer - delta)
-	if send_timer <= 0.0:
-		send_timer = INPUT_INTERVAL
-		_send_input()
+	_update_movement_input(delta)
 	queue_redraw()
 
 func _build_ui() -> void:
@@ -291,9 +290,27 @@ func _draw_hud(state: Dictionary) -> void:
 		status
 	]
 
-func _send_input() -> void:
+func _update_movement_input(delta: float) -> void:
 	if winner_panel.visible:
+		held_direction = Vector2.ZERO
+		repeat_timer = 0.0
 		return
+	var movement := _pressed_direction()
+	if movement == Vector2.ZERO:
+		held_direction = Vector2.ZERO
+		repeat_timer = 0.0
+		return
+	if movement != held_direction:
+		_send_movement_step(movement)
+		held_direction = movement
+		repeat_timer = INPUT_REPEAT_INTERVAL
+		return
+	repeat_timer -= delta
+	if repeat_timer <= 0.0:
+		_send_movement_step(movement)
+		repeat_timer += INPUT_REPEAT_INTERVAL
+
+func _pressed_direction() -> Vector2:
 	var movement := Vector2.ZERO
 	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
 		movement.x -= 1
@@ -305,7 +322,11 @@ func _send_input() -> void:
 		movement.y += 1
 	if abs(movement.x) > 0.0:
 		movement.y = 0.0
-	NetworkManager.send_loot_and_leave_input(movement)
+	return movement
+
+func _send_movement_step(movement: Vector2) -> void:
+	input_sequence += 1
+	NetworkManager.send_loot_and_leave_input(movement, input_sequence)
 
 func _on_game_state_changed(next_game: Dictionary) -> void:
 	_record_event(next_game)

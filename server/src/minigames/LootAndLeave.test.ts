@@ -51,6 +51,7 @@ function setupRoom(playerCount = 2): Room {
 
 function placePlayerForTest(game: LootAndLeaveState, playerId = "p1", x = 5, y = 5): void {
   const player = game.players.find((candidate) => candidate.id === playerId)!;
+  game.slimes = [];
   player.x = x;
   player.y = y;
   player.spawnX = x;
@@ -59,6 +60,12 @@ function placePlayerForTest(game: LootAndLeaveState, playerId = "p1", x = 5, y =
   player.escaped = false;
   player.out = false;
   setTile(game.cave, x, y, 0);
+}
+
+function advanceMoveCooldown(room: Room): void {
+  lootAndLeave.update!(room, 50);
+  lootAndLeave.update!(room, 50);
+  lootAndLeave.update!(room, 50);
 }
 
 test("setup creates a level one cave for two to four players with one slime", () => {
@@ -130,17 +137,82 @@ test("movement enters empty tiles and digging clears dirt with a short cooldown"
   setTile(game.cave, 6, 5, 0);
   setTile(game.cave, 7, 5, 2);
 
-  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 } }));
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 1 }));
   lootAndLeave.update!(room, 50);
   assert.equal(game.players[0].x, 6);
 
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 2 }));
+  advanceMoveCooldown(room);
   lootAndLeave.update!(room, 50);
   assert.equal(game.players[0].x, 7);
   assert.equal(getTile(game.cave, 7, 5), 0);
   assert.equal(game.lastEvent?.type, "dig");
 
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 3 }));
   lootAndLeave.update!(room, 50);
   assert.equal(game.players[0].x, 7);
+});
+
+test("one movement command moves exactly one tile", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 5, 5);
+  setTile(game.cave, 6, 5, 0);
+  setTile(game.cave, 7, 5, 0);
+
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 1 }));
+  advanceMoveCooldown(room);
+  lootAndLeave.update!(room, 50);
+
+  assert.equal(game.players[0].x, 6);
+});
+
+test("duplicate movement commands too close together do not move multiple tiles", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 5, 5);
+  setTile(game.cave, 6, 5, 0);
+  setTile(game.cave, 7, 5, 0);
+
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 1 }));
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 1 }));
+  advanceMoveCooldown(room);
+  lootAndLeave.update!(room, 50);
+
+  assert.equal(game.players[0].x, 6);
+});
+
+test("repeated valid movement commands move predictably after cooldown", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 5, 5);
+  setTile(game.cave, 6, 5, 0);
+  setTile(game.cave, 7, 5, 0);
+  setTile(game.cave, 8, 5, 0);
+
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 1 }));
+  lootAndLeave.update!(room, 50);
+  assert.equal(game.players[0].x, 6);
+
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 2 }));
+  advanceMoveCooldown(room);
+  assert.equal(game.players[0].x, 6);
+
+  lootAndLeave.update!(room, 50);
+  assert.equal(game.players[0].x, 7);
+});
+
+test("blocked movement command does not move", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 5, 5);
+  setTile(game.cave, 6, 5, 1);
+
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 1 }));
+  lootAndLeave.update!(room, 50);
+
+  assert.equal(game.players[0].x, 5);
+  assert.equal(game.players[0].y, 5);
 });
 
 test("falling rocks can roll sideways off supported obstacles", () => {

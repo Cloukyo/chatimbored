@@ -5,6 +5,7 @@ client-godot/.import/
 client-godot/imported/
 client-godot/export/
 client-godot/exports/
+client-godot/builds/web/*.import
 client-godot/*.tmp
 client-godot/*.translation
 

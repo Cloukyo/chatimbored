@@ -30,7 +30,7 @@ export function parseClientMessage(raw: unknown): ClientMessage {
       return { type: "START_GAME", minigameId: message.minigameId };
     case "PLAYER_INPUT":
       if (message.input === "PRESS") return { type: "PLAYER_INPUT", input: "PRESS" };
-      return { type: "PLAYER_INPUT", input: readActNaturalInput(message.input) };
+      return { type: "PLAYER_INPUT", input: readPlayerInput(message.input) };
     case "RETURN_TO_LOBBY":
       return { type: "RETURN_TO_LOBBY" };
     default:
@@ -38,9 +38,15 @@ export function parseClientMessage(raw: unknown): ClientMessage {
   }
 }
 
-function readActNaturalInput(value: unknown): PlayerInputPayload {
+function readPlayerInput(value: unknown): PlayerInputPayload {
   if (!value || typeof value !== "object") throw new Error("Unsupported player input.");
   const input = value as Record<string, unknown>;
+  if (!("aim" in input) && !("shoot" in input) && !("run" in input) && "movement" in input) {
+    return {
+      movement: readVector(input.movement),
+      sequence: readSequence(input.sequence),
+    };
+  }
   return {
     movement: readVector(input.movement),
     aim: readVector(input.aim),
@@ -48,6 +54,11 @@ function readActNaturalInput(value: unknown): PlayerInputPayload {
     shoot: input.shoot === true,
     run: input.run === true,
   };
+}
+
+function readSequence(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) return undefined;
+  return value;
 }
 
 function readVector(value: unknown): { x: number; y: number } {

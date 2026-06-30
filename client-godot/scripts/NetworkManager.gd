@@ -63,11 +63,12 @@ func send_act_natural_input(movement: Vector2, aim: Vector2, shoot: bool, run: b
 		"input": input
 	})
 
-func send_loot_and_leave_input(movement: Vector2) -> void:
+func send_loot_and_leave_input(movement: Vector2, sequence: int) -> void:
 	_send({
 		"type": "PLAYER_INPUT",
 		"input": {
-			"movement": {"x": movement.x, "y": movement.y}
+			"movement": {"x": movement.x, "y": movement.y},
+			"sequence": sequence
 		}
 	})
 

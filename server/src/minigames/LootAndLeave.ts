@@ -2,6 +2,7 @@ import {
   LOOT_AND_LEAVE_BASE_WIDTH,
   LOOT_AND_LEAVE_DURATION_MS,
   LOOT_AND_LEAVE_HEIGHT,
+  LOOT_AND_LEAVE_MOVE_COOLDOWN_TICKS,
   LOOT_AND_LEAVE_STARTING_LIVES,
   LOOT_AND_LEAVE_TICK_MS,
   LOOT_AND_LEAVE_TILES,
@@ -27,8 +28,13 @@ const GEM_CASH = 100;
 const RUBY_CASH = 500;
 
 type Direction = { x: -1 | 0 | 1; y: -1 | 0 | 1 };
+type MovementCommand = { direction: Direction; sequence?: number };
+type RoomInputState = {
+  pending: Map<string, MovementCommand>;
+  lastSequences: Map<string, number>;
+};
 
-const roomInputs = new Map<string, Map<string, Direction>>();
+const roomInputs = new Map<string, RoomInputState>();
 
 export const lootAndLeave: Minigame = {
   id: "loot_and_leave",
@@ -40,7 +46,7 @@ export const lootAndLeave: Minigame = {
   setup(room: Room): GameSnapshot {
     const seed = Math.floor(Math.random() * 1_000_000_000);
     const state = createLevel(room.players.map((player) => player.id), 1, seed);
-    roomInputs.set(room.code, new Map());
+    roomInputs.set(room.code, { pending: new Map(), lastSequences: new Map() });
     return {
       minigameId: this.id,
       name: this.name,
@@ -55,7 +61,16 @@ export const lootAndLeave: Minigame = {
     const player = room.game.lootAndLeave.players.find((candidate) => candidate.id === playerId);
     if (!player || !player.alive || player.escaped || player.out || room.game.winnerId) return room.game;
     const movement = cardinal(input.movement);
-    roomInputs.get(room.code)?.set(playerId, movement);
+    if (movement.x === 0 && movement.y === 0) return room.game;
+    const inputs = roomInputs.get(room.code);
+    if (!inputs) return room.game;
+    const sequence = readInputSequence(input.sequence);
+    if (sequence !== undefined) {
+      const lastSequence = inputs.lastSequences.get(playerId) ?? 0;
+      if (sequence <= lastSequence) return room.game;
+      inputs.lastSequences.set(playerId, sequence);
+    }
+    inputs.pending.set(playerId, { direction: movement, sequence });
     return room.game;
   },
 
@@ -113,16 +128,21 @@ function step(room: Room, game: LootAndLeaveState): void {
 }
 
 function applyPlayerCommands(room: Room, game: LootAndLeaveState): void {
-  const inputs = roomInputs.get(room.code) ?? new Map<string, Direction>();
+  const inputs = roomInputs.get(room.code);
+  if (!inputs) return;
   for (const player of game.players) {
     if (!player.alive || player.escaped || player.out) continue;
     if (player.moveCooldownTicks > 0) {
       player.moveCooldownTicks -= 1;
       continue;
     }
-    const direction = inputs.get(player.id) ?? { x: 0, y: 0 };
+    const command = inputs.pending.get(player.id);
+    if (!command) continue;
+    inputs.pending.delete(player.id);
+    const direction = command.direction;
     if (direction.x === 0 && direction.y === 0) continue;
     tryMove(game, player, direction);
+    player.moveCooldownTicks = Math.max(player.moveCooldownTicks, LOOT_AND_LEAVE_MOVE_COOLDOWN_TICKS);
   }
 }
 
@@ -521,6 +541,11 @@ function winnerId(players: LootAndLeavePlayerState[]): string | undefined {
 
 function isLootInput(input: unknown): input is LootAndLeaveInput {
   return Boolean(input && typeof input === "object" && "movement" in input);
+}
+
+function readInputSequence(sequence: unknown): number | undefined {
+  if (typeof sequence !== "number" || !Number.isSafeInteger(sequence) || sequence < 1) return undefined;
+  return sequence;
 }
 
 function cardinal(vector: Vector2Payload): Direction {

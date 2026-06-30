@@ -580,7 +580,7 @@ func _nearest_previous_rock(to_pos: Vector2, next_rocks: Dictionary, used_previo
 		if next_rocks.has(key) or used_previous.has(key):
 			continue
 		var from_pos: Vector2 = previous_rock_tiles[key]
-		var distance := abs(from_pos.x - to_pos.x) + abs(from_pos.y - to_pos.y)
+		var distance: float = abs(from_pos.x - to_pos.x) + abs(from_pos.y - to_pos.y)
 		if distance > 1.1:
 			continue
 		if distance < best_distance:

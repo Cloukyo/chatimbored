@@ -65,7 +65,6 @@ function placePlayerForTest(game: LootAndLeaveState, playerId = "p1", x = 5, y =
 function advanceMoveCooldown(room: Room): void {
   lootAndLeave.update!(room, 50);
   lootAndLeave.update!(room, 50);
-  lootAndLeave.update!(room, 50);
 }
 
 test("setup creates a level one cave for two to four players with one slime", () => {
@@ -200,6 +199,25 @@ test("repeated valid movement commands move predictably after cooldown", () => {
 
   lootAndLeave.update!(room, 50);
   assert.equal(game.players[0].x, 7);
+});
+
+test("valid movement commands queued during cooldown apply in order", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 5, 5);
+  setTile(game.cave, 6, 5, 0);
+  setTile(game.cave, 6, 6, 0);
+
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 1 }));
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 0, y: 1 }, sequence: 2 }));
+  lootAndLeave.update!(room, 50);
+  assert.equal(game.players[0].x, 6);
+  assert.equal(game.players[0].y, 5);
+
+  advanceMoveCooldown(room);
+  lootAndLeave.update!(room, 50);
+  assert.equal(game.players[0].x, 6);
+  assert.equal(game.players[0].y, 6);
 });
 
 test("blocked movement command does not move", () => {

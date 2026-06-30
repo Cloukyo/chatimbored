@@ -1,6 +1,6 @@
 extends Control
 
-const INPUT_REPEAT_INTERVAL := 0.18
+const INPUT_REPEAT_INTERVAL := 0.135
 const TILE_SIZE := 34.0
 const HUD_HEIGHT := 86.0
 const EFFECT_SECONDS := 0.32
@@ -19,6 +19,10 @@ var game: Dictionary = {}
 var held_direction := Vector2.ZERO
 var repeat_timer := 0.0
 var input_sequence := 0
+var pending_predictions: Array[Dictionary] = []
+var prediction_base_tile := Vector2.ZERO
+var predicted_tile := Vector2.ZERO
+var has_prediction := false
 var last_event_key := ""
 var animated_effects: Array[Dictionary] = []
 var display_positions: Dictionary = {}
@@ -235,8 +239,9 @@ func _draw_players(origin: Vector2, scale: float, state: Dictionary) -> void:
 	for player in state.get("players", []):
 		if bool(player.get("out", false)) or bool(player.get("escaped", false)):
 			continue
-		var pos: Vector2 = _smoothed_tile_center(origin, scale, "player_%s" % str(player.get("id", "")), int(player.get("x", 0)), int(player.get("y", 0)))
 		var is_local := str(player.get("id", "")) == NetworkManager.player_id
+		var tile := _visual_tile_for_player(player, is_local)
+		var pos: Vector2 = _smoothed_tile_center(origin, scale, "player_%s" % str(player.get("id", "")), tile.x, tile.y)
 		var color := Color(0.90, 0.86, 0.48) if is_local else Color(0.58, 0.66, 0.82)
 		draw_rect(Rect2(pos + Vector2(-7, 2) * scale, Vector2(14, 16) * scale), Color(0.12, 0.12, 0.11))
 		draw_rect(Rect2(pos + Vector2(-9, -8) * scale, Vector2(18, 11) * scale), Color(0.95, 0.72, 0.52))
@@ -255,6 +260,8 @@ func _draw_effects(origin: Vector2, scale: float) -> void:
 				draw_circle(pos, (12.0 + t * 24.0) * scale, Color(0.95, 1.0, 0.65, 0.35 * alpha))
 			"dig":
 				draw_circle(pos, (8.0 + t * 12.0) * scale, Color(0.42, 0.28, 0.13, 0.30 * alpha))
+			"blocked":
+				draw_rect(Rect2(pos - Vector2(12, 12) * scale, Vector2(24, 24) * scale), Color(1.0, 0.18, 0.08, 0.36 * alpha), false, 2.0)
 			"player_hit", "slime_hit":
 				draw_circle(pos, (18.0 + t * 15.0) * scale, Color(1.0, 0.08, 0.04, 0.32 * alpha))
 			"rock_impact", "loot_drop":
@@ -326,15 +333,61 @@ func _pressed_direction() -> Vector2:
 
 func _send_movement_step(movement: Vector2) -> void:
 	input_sequence += 1
+	_predict_movement_step(movement, input_sequence)
 	NetworkManager.send_loot_and_leave_input(movement, input_sequence)
+
+func _predict_movement_step(movement: Vector2, sequence: int) -> void:
+	var state: Dictionary = game.get("lootAndLeave", {})
+	var local := _local_player(state)
+	if local.is_empty() or bool(local.get("out", false)) or bool(local.get("escaped", false)) or not bool(local.get("alive", true)):
+		return
+	var start := predicted_tile if has_prediction else Vector2(float(local.get("x", 0)), float(local.get("y", 0)))
+	var target := start + movement
+	if not _can_predict_tile(state, int(target.x), int(target.y)):
+		_show_blocked_prediction(target)
+		return
+	if not has_prediction:
+		prediction_base_tile = start
+	has_prediction = true
+	predicted_tile = target
+	pending_predictions.append({
+		"sequence": sequence,
+		"to": target
+	})
+
+func _can_predict_tile(state: Dictionary, x: int, y: int) -> bool:
+	var cave: Dictionary = state.get("cave", {})
+	var width := int(cave.get("width", 0))
+	var height := int(cave.get("height", 0))
+	if x < 0 or y < 0 or x >= width or y >= height:
+		return false
+	for slime in state.get("slimes", []):
+		if int(slime.get("x", -1)) == x and int(slime.get("y", -1)) == y:
+			return false
+	var tiles: Array = cave.get("tiles", [])
+	var tile := WALL
+	var index := y * width + x
+	if index >= 0 and index < tiles.size():
+		tile = int(tiles[index])
+	return tile != WALL and tile != ROCK
+
+func _show_blocked_prediction(target: Vector2) -> void:
+	animated_effects.append({
+		"type": "blocked",
+		"x": int(target.x),
+		"y": int(target.y),
+		"life": 0.16
+	})
 
 func _on_game_state_changed(next_game: Dictionary) -> void:
 	_record_event(next_game)
 	game = next_game
+	_reconcile_local_prediction()
 
 func _on_game_over(next_game: Dictionary, winner_id: String) -> void:
 	_record_event(next_game)
 	game = next_game
+	_clear_prediction()
 	var winner_name := "No winner"
 	for player in NetworkManager.room.players:
 		if player.get("id", "") == winner_id:
@@ -350,6 +403,7 @@ func _on_room_state_changed(room: RoomState, _player_id: String) -> void:
 		get_tree().change_scene_to_file("res://scenes/Lobby.tscn")
 	else:
 		game = room.game
+		_reconcile_local_prediction()
 
 func _record_event(next_game: Dictionary) -> void:
 	var state: Dictionary = next_game.get("lootAndLeave", {})
@@ -385,6 +439,55 @@ func _player_by_id(state: Dictionary, player_id: String) -> Dictionary:
 			return player
 	return {}
 
+func _visual_tile_for_player(player: Dictionary, is_local: bool) -> Vector2:
+	if is_local and has_prediction:
+		return predicted_tile
+	return Vector2(float(player.get("x", 0)), float(player.get("y", 0)))
+
+func _reconcile_local_prediction() -> void:
+	var state: Dictionary = game.get("lootAndLeave", {})
+	var local := _local_player(state)
+	if local.is_empty():
+		_clear_prediction()
+		return
+	if bool(local.get("out", false)) or bool(local.get("escaped", false)) or not bool(local.get("alive", true)):
+		_clear_prediction()
+		return
+	var server_tile := Vector2(float(local.get("x", 0)), float(local.get("y", 0)))
+	if pending_predictions.is_empty():
+		has_prediction = false
+		predicted_tile = server_tile
+		prediction_base_tile = server_tile
+		return
+	var confirmed_index := -1
+	for index in range(pending_predictions.size()):
+		var move: Dictionary = pending_predictions[index]
+		var target: Vector2 = move.get("to", server_tile)
+		if target == server_tile:
+			confirmed_index = index
+			break
+	if confirmed_index >= 0:
+		pending_predictions = pending_predictions.slice(confirmed_index + 1)
+		prediction_base_tile = server_tile
+		if pending_predictions.is_empty():
+			has_prediction = false
+			predicted_tile = server_tile
+		else:
+			var last_move: Dictionary = pending_predictions[pending_predictions.size() - 1]
+			predicted_tile = last_move.get("to", server_tile)
+			has_prediction = true
+		return
+	if server_tile == prediction_base_tile:
+		return
+	pending_predictions.clear()
+	prediction_base_tile = server_tile
+	predicted_tile = server_tile
+	has_prediction = false
+
+func _clear_prediction() -> void:
+	pending_predictions.clear()
+	has_prediction = false
+
 func _tile_center(origin: Vector2, scale: float, x: int, y: int) -> Vector2:
 	return origin + Vector2(float(x) + 0.5, float(y) + 0.5) * TILE_SIZE * scale
 
@@ -411,7 +514,7 @@ func _play_event_sound(event_type: String, message: String) -> void:
 	player.stop()
 	player.play()
 
-func _smoothed_tile_center(origin: Vector2, scale: float, key: String, x: int, y: int) -> Vector2:
+func _smoothed_tile_center(origin: Vector2, scale: float, key: String, x: float, y: float) -> Vector2:
 	var target := Vector2(float(x), float(y))
 	if not display_positions.has(key):
 		display_positions[key] = target

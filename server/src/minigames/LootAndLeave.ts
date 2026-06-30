@@ -30,9 +30,10 @@ const RUBY_CASH = 500;
 type Direction = { x: -1 | 0 | 1; y: -1 | 0 | 1 };
 type MovementCommand = { direction: Direction; sequence?: number };
 type RoomInputState = {
-  pending: Map<string, MovementCommand>;
+  pending: Map<string, MovementCommand[]>;
   lastSequences: Map<string, number>;
 };
+const MAX_PENDING_MOVES = 4;
 
 const roomInputs = new Map<string, RoomInputState>();
 
@@ -70,7 +71,9 @@ export const lootAndLeave: Minigame = {
       if (sequence <= lastSequence) return room.game;
       inputs.lastSequences.set(playerId, sequence);
     }
-    inputs.pending.set(playerId, { direction: movement, sequence });
+    const queue = inputs.pending.get(playerId) ?? [];
+    queue.push({ direction: movement, sequence });
+    inputs.pending.set(playerId, queue.slice(-MAX_PENDING_MOVES));
     return room.game;
   },
 
@@ -136,9 +139,11 @@ function applyPlayerCommands(room: Room, game: LootAndLeaveState): void {
       player.moveCooldownTicks -= 1;
       continue;
     }
-    const command = inputs.pending.get(player.id);
+    const queue = inputs.pending.get(player.id);
+    const command = queue?.shift();
     if (!command) continue;
-    inputs.pending.delete(player.id);
+    if (queue && queue.length > 0) inputs.pending.set(player.id, queue);
+    else inputs.pending.delete(player.id);
     const direction = command.direction;
     if (direction.x === 0 && direction.y === 0) continue;
     tryMove(game, player, direction);

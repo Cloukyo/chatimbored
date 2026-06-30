@@ -6,10 +6,9 @@ This guide prepares `chatImbored` for a temporary online playtest with friends. 
 
 Treat `main` as the live playtest branch. Anything merged to `main` should be ready for friends to test online.
 
-Future feature work should happen on a separate branch and come back through a pull request. Before merging a pull request into `main`, run the local checks:
+Future feature work should happen on a separate branch and come back through a pull request. Before merging a pull request into `main`, run the local checks from the repo root:
 
 ```bash
-cd server
 npm test
 npm run build
 ```
@@ -28,7 +27,6 @@ For deployed playtests, the Godot client should connect to a secure WebSocket UR
 From the repo root:
 
 ```bash
-cd server
 npm install
 npm run build
 npm start
@@ -41,6 +39,12 @@ npm start
 ```
 
 That runs:
+
+```bash
+npm --workspace server run start
+```
+
+The server workspace then runs:
 
 ```bash
 node dist/server/src/index.js
@@ -181,15 +185,17 @@ https://your-static-site.example/?server=wss%3A%2F%2Fyour-server.example.com
 
 ## Notes For Hosting Providers
 
-Use these settings as a starting point:
+Use these Railway settings:
 
 - Branch: `main`
-- Root directory: `server`
+- Root Directory: leave empty, or set it to the repo root. Do not set it to `server`.
 - Install command: `npm install`
 - Build command: `npm run build`
 - Start command: `npm start`
 - Node version: `20` or newer
 - Port: leave automatic; the server reads `process.env.PORT`
+
+Railway must build from the repo root because the server imports shared TypeScript files from the sibling `shared/` folder. If Railway's Root Directory is `server`, the build cannot see `shared/` and TypeScript will fail with missing module errors.
 
 Do not upload `dist/client-web/` to the Node server host. It belongs on the static web host.
 

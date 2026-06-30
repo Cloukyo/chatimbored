@@ -10,6 +10,15 @@ No environment variables are required for local testing. The server defaults to 
 
 ## Run the Server
 
+From the repo root:
+
+```bash
+npm install
+npm run dev
+```
+
+Or from the server folder:
+
 ```bash
 cd server
 npm install
@@ -53,7 +62,7 @@ See [deployment.md](deployment.md) for the full beginner-friendly deployment flo
 
 Short version:
 
-1. Run `npm run build` and `npm start` in `server/`.
+1. Run `npm run build` and `npm start` from the repo root.
 2. Export Godot's `Web` preset to `dist/client-web/index.html`.
 3. Host `dist/client-web/` on a static host.
 4. Open the hosted web client with `?server=wss%3A%2F%2Fyour-server.example.com`.

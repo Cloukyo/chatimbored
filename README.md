@@ -26,6 +26,15 @@ Open the repo root in Codex or VS Code. Open only `client-godot/` in Godot.
 
 ## Quick Start
 
+From the repo root:
+
+```bash
+npm install
+npm run dev
+```
+
+Or from the server folder:
+
 ```bash
 cd server
 npm install
@@ -37,7 +46,6 @@ Then open `client-godot/` in Godot 4 and run the project.
 Production server check:
 
 ```bash
-cd server
 npm run build
 npm start
 ```

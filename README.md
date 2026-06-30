@@ -2,14 +2,14 @@
 
 `chatImbored` is a browser-first online multiplayer party game platform prototype. One player creates a room, shares the room code or link, friends join in their browsers, and the group plays short minigames.
 
-This first milestone only proves the loop:
+The current scaffold proves the core platform loop:
 
 1. Create room.
 2. Join room.
 3. See lobby player list.
 4. Ready up.
-5. Host starts Button Race.
-6. Press for 10 seconds.
+5. Host starts a minigame.
+6. Play Button Race, Act Natural, or Loot & Leave.
 7. Server declares the winner.
 8. Return to lobby.
 
@@ -34,4 +34,16 @@ npm run dev
 
 Then open `client-godot/` in Godot 4 and run the project.
 
-See [docs/local-setup.md](docs/local-setup.md) for two-client testing and future Web export notes.
+Production server check:
+
+```bash
+cd server
+npm run build
+npm start
+```
+
+See [docs/local-setup.md](docs/local-setup.md) for two-client testing and [docs/deployment.md](docs/deployment.md) for Web export and online playtest setup.
+
+## Playtest Branch
+
+`main` is the live playtest branch. Build new features on branches, test locally, open a pull request, and merge to `main` only when the build and local playtest pass.

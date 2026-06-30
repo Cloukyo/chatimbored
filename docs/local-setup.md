@@ -6,7 +6,7 @@
 - npm.
 - Godot 4.x.
 
-No environment variables are required for the prototype. The server defaults to port `8787`; set `PORT` to override it.
+No environment variables are required for local testing. The server defaults to port `8787`; set `PORT` to override it.
 
 ## Run the Server
 
@@ -30,6 +30,12 @@ ws://localhost:8787
 
 The client connects to `ws://localhost:8787` by default through `NetworkManager.gd`.
 
+To test against another server URL from the editor, set:
+
+```bash
+set CHATIMBORED_SERVER_URL=ws://localhost:8787
+```
+
 ## Test Two Local Players
 
 1. Start the Node server.
@@ -41,13 +47,15 @@ The client connects to `ws://localhost:8787` by default through `NetworkManager.
 7. Press the button in each client for 10 seconds.
 8. Confirm the server declares a winner and the host can return the room to lobby.
 
-## Future Browser Export
+## Web Export And Deployment
 
-When exporting to Web from Godot later:
+See [deployment.md](deployment.md) for the full beginner-friendly deployment flow.
 
-1. Keep the server running at a reachable WebSocket URL.
-2. Export the Godot project from `client-godot/`.
-3. Configure `NetworkManager.server_url` for the deployed WebSocket endpoint.
-4. Serve the exported files from a static host.
+Short version:
 
-For production hosting, use secure WebSockets (`wss://`) and an explicit allowed origin policy.
+1. Run `npm run build` and `npm start` in `server/`.
+2. Export Godot's `Web` preset to `dist/client-web/index.html`.
+3. Host `dist/client-web/` on a static host.
+4. Open the hosted web client with `?server=wss%3A%2F%2Fyour-server.example.com`.
+
+For deployed browser testing, use secure WebSockets (`wss://`).

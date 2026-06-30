@@ -13,6 +13,9 @@ var room := RoomState.new()
 var player_id := ""
 var connected := false
 
+func _ready() -> void:
+	_apply_runtime_server_url()
+
 func _process(_delta: float) -> void:
 	socket.poll()
 	var state := socket.get_ready_state()
@@ -25,7 +28,7 @@ func _process(_delta: float) -> void:
 		connection_error.emit("Disconnected from server.")
 
 func connect_to_server(url := DEFAULT_SERVER_URL) -> void:
-	server_url = url
+	server_url = _configured_server_url(url)
 	var error := socket.connect_to_url(server_url)
 	if error != OK:
 		connection_error.emit("Could not connect to %s" % server_url)
@@ -76,6 +79,35 @@ func _send(message: Dictionary) -> void:
 		connect_to_server(server_url)
 		await get_tree().create_timer(0.2).timeout
 	socket.send_text(JSON.stringify(message))
+
+func _configured_server_url(requested_url: String) -> String:
+	if requested_url != DEFAULT_SERVER_URL:
+		return requested_url
+	return server_url
+
+func _apply_runtime_server_url() -> void:
+	var env_url := OS.get_environment("CHATIMBORED_SERVER_URL").strip_edges()
+	if env_url != "":
+		server_url = env_url
+		return
+
+	if not OS.has_feature("web"):
+		return
+
+	var script := """
+	(function () {
+		const params = new URLSearchParams(window.location.search);
+		const fromQuery = params.get("server");
+		if (fromQuery) {
+			window.localStorage.setItem("CHATIMBORED_SERVER_URL", fromQuery);
+			return fromQuery;
+		}
+		return window.CHATIMBORED_SERVER_URL || window.localStorage.getItem("CHATIMBORED_SERVER_URL") || "";
+	})()
+	"""
+	var web_url: Variant = JavaScriptBridge.eval(script)
+	if typeof(web_url) == TYPE_STRING and str(web_url).strip_edges() != "":
+		server_url = str(web_url).strip_edges()
 
 func _handle_packet(text: String) -> void:
 	var parsed = JSON.parse_string(text)

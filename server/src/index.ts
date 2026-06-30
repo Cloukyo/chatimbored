@@ -9,7 +9,16 @@ const port = Number(process.env.PORT ?? 8787);
 const manager = new RoomManager();
 const sockets = new Map<string, WebSocket>();
 
-const server = createServer();
+const server = createServer((request, response) => {
+  if (request.url === "/health") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true, service: "chatimbored-server" }));
+    return;
+  }
+
+  response.writeHead(200, { "content-type": "text/plain" });
+  response.end("chatImbored WebSocket server is running.\n");
+});
 const wss = new WebSocketServer({ server });
 
 wss.on("connection", (socket) => {
@@ -57,7 +66,7 @@ wss.on("connection", (socket) => {
 });
 
 server.listen(port, () => {
-  console.log(`chatImbored server listening on ws://localhost:${port}`);
+  console.log(`chatImbored server listening on port ${port}`);
 });
 
 function finishAndBroadcast(room: Room): void {

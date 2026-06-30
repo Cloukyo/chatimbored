@@ -64,7 +64,6 @@ function placePlayerForTest(game: LootAndLeaveState, playerId = "p1", x = 5, y =
 
 function advanceMoveCooldown(room: Room): void {
   lootAndLeave.update!(room, 50);
-  lootAndLeave.update!(room, 50);
 }
 
 test("setup creates a level one cave for two to four players with one slime", () => {

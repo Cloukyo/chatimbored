@@ -1,6 +1,6 @@
 extends Control
 
-const INPUT_REPEAT_INTERVAL := 0.135
+const INPUT_REPEAT_INTERVAL := 0.11
 const TILE_SIZE := 34.0
 const HUD_HEIGHT := 86.0
 const EFFECT_SECONDS := 0.32
@@ -23,6 +23,8 @@ var pending_predictions: Array[Dictionary] = []
 var prediction_base_tile := Vector2.ZERO
 var predicted_tile := Vector2.ZERO
 var has_prediction := false
+var predicted_dig_tiles: Dictionary = {}
+var previous_rock_tiles: Dictionary = {}
 var last_event_key := ""
 var animated_effects: Array[Dictionary] = []
 var display_positions: Dictionary = {}
@@ -42,10 +44,12 @@ func _ready() -> void:
 	_build_ui()
 	_build_sfx()
 	game = NetworkManager.room.game
+	previous_rock_tiles = _rock_tiles(game.get("lootAndLeave", {}))
 	queue_redraw()
 
 func _process(delta: float) -> void:
 	_update_effects(delta)
+	_update_predicted_digs(delta)
 	shake_timer = max(0.0, shake_timer - delta)
 	_update_movement_input(delta)
 	queue_redraw()
@@ -109,6 +113,7 @@ func _draw() -> void:
 		origin += Vector2(sin(Time.get_ticks_msec() * 0.07), cos(Time.get_ticks_msec() * 0.083)) * strength
 
 	_draw_tiles(origin, scale, state)
+	_draw_rocks(origin, scale, state)
 	_draw_bags(origin, scale, state)
 	_draw_slimes(origin, scale, state)
 	_draw_players(origin, scale, state)
@@ -149,9 +154,13 @@ func _draw_tiles(origin: Vector2, scale: float, state: Dictionary) -> void:
 				WALL:
 					_draw_wall(rect, x, y)
 				DIRT:
-					_draw_dirt(rect, x, y)
+					if predicted_dig_tiles.has(_pos_key(x, y)):
+						_draw_empty(rect, x, y)
+						_draw_predicted_dig(rect, predicted_dig_tiles[_pos_key(x, y)])
+					else:
+						_draw_dirt(rect, x, y)
 				ROCK:
-					_draw_rock(rect, state)
+					_draw_empty(rect, x, y)
 				GEM:
 					_draw_gem(rect, Color(0.76, 0.90, 1.0), Color(0.30, 0.43, 0.80))
 				RUBY:
@@ -198,6 +207,26 @@ func _draw_rock(rect: Rect2, state: Dictionary) -> void:
 	var outline := PackedVector2Array(points)
 	outline.append(points[0])
 	draw_polyline(outline, Color(0.20, 0.20, 0.20), 2.0)
+
+func _draw_rocks(origin: Vector2, scale: float, state: Dictionary) -> void:
+	var cave: Dictionary = state.get("cave", {})
+	var width := int(cave.get("width", 0))
+	var height := int(cave.get("height", 0))
+	var tiles: Array = cave.get("tiles", [])
+	for y in range(height):
+		for x in range(width):
+			if int(tiles[y * width + x]) != ROCK:
+				continue
+			var key := "rock_%s" % _pos_key(x, y)
+			var center := _smoothed_tile_center(origin, scale, key, float(x), float(y), 0.68)
+			var rect := Rect2(center - Vector2(TILE_SIZE, TILE_SIZE) * scale * 0.5, Vector2(TILE_SIZE, TILE_SIZE) * scale)
+			_draw_rock(rect, state)
+
+func _draw_predicted_dig(rect: Rect2, dig: Dictionary) -> void:
+	var life := float(dig.get("life", 0.0))
+	var alpha := clampf(life / 0.22, 0.0, 1.0)
+	draw_rect(rect.grow(-2), Color(0.42, 0.28, 0.13, 0.18 * alpha))
+	draw_circle(rect.get_center(), rect.size.x * (0.18 + (1.0 - alpha) * 0.25), Color(0.55, 0.38, 0.18, 0.28 * alpha))
 
 func _draw_gem(rect: Rect2, fill: Color, edge: Color) -> void:
 	var c := rect.get_center()
@@ -346,6 +375,12 @@ func _predict_movement_step(movement: Vector2, sequence: int) -> void:
 	if not _can_predict_tile(state, int(target.x), int(target.y)):
 		_show_blocked_prediction(target)
 		return
+	if _tile_at(state, int(target.x), int(target.y)) == DIRT:
+		predicted_dig_tiles[_pos_key(int(target.x), int(target.y))] = {
+			"x": int(target.x),
+			"y": int(target.y),
+			"life": 0.22
+		}
 	if not has_prediction:
 		prediction_base_tile = start
 	has_prediction = true
@@ -364,12 +399,20 @@ func _can_predict_tile(state: Dictionary, x: int, y: int) -> bool:
 	for slime in state.get("slimes", []):
 		if int(slime.get("x", -1)) == x and int(slime.get("y", -1)) == y:
 			return false
-	var tiles: Array = cave.get("tiles", [])
-	var tile := WALL
-	var index := y * width + x
-	if index >= 0 and index < tiles.size():
-		tile = int(tiles[index])
+	var tile := _tile_at(state, x, y)
 	return tile != WALL and tile != ROCK
+
+func _tile_at(state: Dictionary, x: int, y: int) -> int:
+	var cave: Dictionary = state.get("cave", {})
+	var width := int(cave.get("width", 0))
+	var height := int(cave.get("height", 0))
+	if x < 0 or y < 0 or x >= width or y >= height:
+		return WALL
+	var tiles: Array = cave.get("tiles", [])
+	var index := y * width + x
+	if index < 0 or index >= tiles.size():
+		return WALL
+	return int(tiles[index])
 
 func _show_blocked_prediction(target: Vector2) -> void:
 	animated_effects.append({
@@ -381,6 +424,7 @@ func _show_blocked_prediction(target: Vector2) -> void:
 
 func _on_game_state_changed(next_game: Dictionary) -> void:
 	_record_event(next_game)
+	_capture_rock_motion(next_game)
 	game = next_game
 	_reconcile_local_prediction()
 
@@ -402,6 +446,7 @@ func _on_room_state_changed(room: RoomState, _player_id: String) -> void:
 	if room.phase == "lobby":
 		get_tree().change_scene_to_file("res://scenes/Lobby.tscn")
 	else:
+		_capture_rock_motion(room.game)
 		game = room.game
 		_reconcile_local_prediction()
 
@@ -429,6 +474,18 @@ func _update_effects(delta: float) -> void:
 		effect["life"] = float(effect.get("life", 0.0)) - delta
 		return float(effect["life"]) > 0.0
 	)
+
+func _update_predicted_digs(delta: float) -> void:
+	var state: Dictionary = game.get("lootAndLeave", {})
+	for key in predicted_dig_tiles.keys():
+		var dig: Dictionary = predicted_dig_tiles[key]
+		var x := int(dig.get("x", 0))
+		var y := int(dig.get("y", 0))
+		dig["life"] = float(dig.get("life", 0.0)) - delta
+		if _tile_at(state, x, y) != DIRT or float(dig["life"]) <= 0.0:
+			predicted_dig_tiles.erase(key)
+		else:
+			predicted_dig_tiles[key] = dig
 
 func _local_player(state: Dictionary) -> Dictionary:
 	return _player_by_id(state, NetworkManager.player_id)
@@ -488,6 +545,49 @@ func _clear_prediction() -> void:
 	pending_predictions.clear()
 	has_prediction = false
 
+func _capture_rock_motion(next_game: Dictionary) -> void:
+	var next_state: Dictionary = next_game.get("lootAndLeave", {})
+	if next_state.is_empty():
+		return
+	var next_rocks := _rock_tiles(next_state)
+	var used_previous := {}
+	for key in next_rocks.keys():
+		if previous_rock_tiles.has(key):
+			continue
+		var to_pos: Vector2 = next_rocks[key]
+		var from_pos := _nearest_previous_rock(to_pos, next_rocks, used_previous)
+		if from_pos.x < 99999.0:
+			display_positions["rock_%s" % key] = from_pos
+			used_previous[_pos_key(int(from_pos.x), int(from_pos.y))] = true
+	previous_rock_tiles = next_rocks
+
+func _rock_tiles(state: Dictionary) -> Dictionary:
+	var rocks := {}
+	var cave: Dictionary = state.get("cave", {})
+	var width := int(cave.get("width", 0))
+	var height := int(cave.get("height", 0))
+	var tiles: Array = cave.get("tiles", [])
+	for y in range(height):
+		for x in range(width):
+			if int(tiles[y * width + x]) == ROCK:
+				rocks[_pos_key(x, y)] = Vector2(float(x), float(y))
+	return rocks
+
+func _nearest_previous_rock(to_pos: Vector2, next_rocks: Dictionary, used_previous: Dictionary) -> Vector2:
+	var best := Vector2(999999.0, 999999.0)
+	var best_distance := 999.0
+	for key in previous_rock_tiles.keys():
+		if next_rocks.has(key) or used_previous.has(key):
+			continue
+		var from_pos: Vector2 = previous_rock_tiles[key]
+		var distance := abs(from_pos.x - to_pos.x) + abs(from_pos.y - to_pos.y)
+		if distance > 1.1:
+			continue
+		if distance < best_distance:
+			best = from_pos
+			best_distance = distance
+	return best
+
 func _tile_center(origin: Vector2, scale: float, x: int, y: int) -> Vector2:
 	return origin + Vector2(float(x) + 0.5, float(y) + 0.5) * TILE_SIZE * scale
 
@@ -495,8 +595,9 @@ func _vision_strength(state: Dictionary, x: int, y: int) -> float:
 	var local := _local_player(state)
 	if local.is_empty() or bool(local.get("out", false)) or bool(local.get("escaped", false)):
 		return 1.0
-	var dx := float(x) + 0.5 - float(local.get("x", 0))
-	var dy := float(y) + 0.5 - float(local.get("y", 0))
+	var visual_tile := _visual_tile_for_player(local, true)
+	var dx := float(x) + 0.5 - (visual_tile.x + 0.5)
+	var dy := float(y) + 0.5 - (visual_tile.y + 0.5)
 	var distance := Vector2(dx, dy).length()
 	if distance <= VISION_FULL_TILES:
 		return 1.0
@@ -514,14 +615,17 @@ func _play_event_sound(event_type: String, message: String) -> void:
 	player.stop()
 	player.play()
 
-func _smoothed_tile_center(origin: Vector2, scale: float, key: String, x: float, y: float) -> Vector2:
+func _smoothed_tile_center(origin: Vector2, scale: float, key: String, x: float, y: float, weight := 0.42) -> Vector2:
 	var target := Vector2(float(x), float(y))
 	if not display_positions.has(key):
 		display_positions[key] = target
 	var current: Vector2 = display_positions[key]
-	current = current.lerp(target, 0.42)
+	current = current.lerp(target, weight)
 	display_positions[key] = current
 	return origin + (current + Vector2(0.5, 0.5)) * TILE_SIZE * scale
 
 func _variant(x: int, y: int, salt: int) -> int:
 	return abs(x * 73856093 ^ y * 19349663 ^ salt * 83492791)
+
+func _pos_key(x: int, y: int) -> String:
+	return "%s,%s" % [x, y]

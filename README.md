@@ -50,7 +50,7 @@ npm run build
 npm start
 ```
 
-See [docs/local-setup.md](docs/local-setup.md) for two-client testing and [docs/deployment.md](docs/deployment.md) for Web export and online playtest setup.
+See [docs/local-setup.md](docs/local-setup.md) for two-client testing and [docs/deployment.md](docs/deployment.md) for Railway server and Vercel Godot Web deployment setup.
 
 ## Playtest Branch
 

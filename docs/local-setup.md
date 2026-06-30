@@ -63,8 +63,8 @@ See [deployment.md](deployment.md) for the full beginner-friendly deployment flo
 Short version:
 
 1. Run `npm run build` and `npm start` from the repo root.
-2. Export Godot's `Web` preset to `dist/client-web/index.html`.
-3. Host `dist/client-web/` on a static host.
-4. Open the hosted web client with `?server=wss%3A%2F%2Fyour-server.example.com`.
+2. Export Godot's `Web` preset to `client-godot/builds/web/index.html`.
+3. Host `client-godot/builds/web/` on Vercel or another static host.
+4. Open the hosted web client with `?server=wss://chatimbored-production.up.railway.app`.
 
 For deployed browser testing, use secure WebSockets (`wss://`).

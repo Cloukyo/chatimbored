@@ -219,6 +219,30 @@ test("valid movement commands queued during cooldown apply in order", () => {
   assert.equal(game.players[0].y, 6);
 });
 
+test("pending movement queue keeps only the two latest commands", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 5, 5);
+  setTile(game.cave, 6, 5, 0);
+  setTile(game.cave, 7, 5, 0);
+  setTile(game.cave, 5, 6, 0);
+  setTile(game.cave, 4, 6, 0);
+
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 1 }));
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 }, sequence: 2 }));
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 0, y: 1 }, sequence: 3 }));
+  lootAndLeave.handleInput(room, "p1", input({ movement: { x: -1, y: 0 }, sequence: 4 }));
+
+  lootAndLeave.update!(room, 50);
+  assert.equal(game.players[0].x, 5);
+  assert.equal(game.players[0].y, 6);
+
+  advanceMoveCooldown(room);
+  lootAndLeave.update!(room, 50);
+  assert.equal(game.players[0].x, 4);
+  assert.equal(game.players[0].y, 6);
+});
+
 test("blocked movement command does not move", () => {
   const room = setupRoom();
   const game = state(room);

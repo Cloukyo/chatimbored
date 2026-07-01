@@ -33,7 +33,7 @@ type RoomInputState = {
   pending: Map<string, MovementCommand[]>;
   lastSequences: Map<string, number>;
 };
-const MAX_PENDING_MOVES = 4;
+const MAX_PENDING_MOVES = 2;
 
 const roomInputs = new Map<string, RoomInputState>();
 

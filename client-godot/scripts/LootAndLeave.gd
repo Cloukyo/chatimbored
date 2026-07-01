@@ -1,6 +1,7 @@
 extends Control
 
 const INPUT_REPEAT_INTERVAL := 0.11
+const INPUT_BUFFER_SECONDS := 0.15
 const INPUT_VISUAL_DELAY_SECONDS := 5.0 / 60.0
 const TILE_SIZE := 34.0
 const HUD_HEIGHT := 86.0
@@ -20,6 +21,8 @@ var game: Dictionary = {}
 var held_direction := Vector2.ZERO
 var repeat_timer := 0.0
 var input_sequence := 0
+var buffered_direction := Vector2.ZERO
+var buffered_input_timer := 0.0
 var pending_predictions: Array[Dictionary] = []
 var prediction_base_tile := Vector2.ZERO
 var predicted_tile := Vector2.ZERO
@@ -71,6 +74,7 @@ func _input(event: InputEvent) -> void:
 		if key_event.pressed:
 			direction_press_counter += 1
 			direction_press_order[direction_name] = direction_press_counter
+			_buffer_movement(_direction_vector(direction_name))
 		else:
 			direction_press_order.erase(direction_name)
 
@@ -348,23 +352,48 @@ func _draw_hud(state: Dictionary) -> void:
 
 func _update_movement_input(delta: float) -> void:
 	if winner_panel.visible:
-		held_direction = Vector2.ZERO
-		repeat_timer = 0.0
+		_reset_movement_input()
 		return
 	var movement := _pressed_direction()
-	if movement == Vector2.ZERO:
+	if movement != Vector2.ZERO and movement != held_direction:
+		_buffer_movement(movement)
+	if movement == Vector2.ZERO and buffered_direction == Vector2.ZERO:
 		held_direction = Vector2.ZERO
 		repeat_timer = 0.0
 		return
-	if movement != held_direction:
-		_send_movement_step(movement)
-		held_direction = movement
-		repeat_timer = INPUT_REPEAT_INTERVAL
+	repeat_timer = max(0.0, repeat_timer - delta)
+	if repeat_timer > 0.0:
+		_update_input_buffer(delta)
 		return
-	repeat_timer -= delta
-	if repeat_timer <= 0.0:
-		_send_movement_step(movement)
-		repeat_timer += INPUT_REPEAT_INTERVAL
+	var next_movement := buffered_direction if buffered_direction != Vector2.ZERO else movement
+	if next_movement == Vector2.ZERO:
+		return
+	_clear_input_buffer()
+	_send_movement_step(next_movement)
+	held_direction = next_movement
+	repeat_timer = INPUT_REPEAT_INTERVAL
+
+func _buffer_movement(movement: Vector2) -> void:
+	if movement == Vector2.ZERO:
+		return
+	buffered_direction = movement
+	buffered_input_timer = INPUT_BUFFER_SECONDS
+
+func _update_input_buffer(delta: float) -> void:
+	if buffered_direction == Vector2.ZERO:
+		return
+	buffered_input_timer -= delta
+	if buffered_input_timer <= 0.0:
+		_clear_input_buffer()
+
+func _clear_input_buffer() -> void:
+	buffered_direction = Vector2.ZERO
+	buffered_input_timer = 0.0
+
+func _reset_movement_input() -> void:
+	held_direction = Vector2.ZERO
+	repeat_timer = 0.0
+	_clear_input_buffer()
 
 func _pressed_direction() -> Vector2:
 	var best_name := ""

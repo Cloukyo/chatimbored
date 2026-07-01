@@ -1,6 +1,7 @@
 extends Control
 
 const INPUT_REPEAT_INTERVAL := 0.11
+const INPUT_VISUAL_DELAY_SECONDS := 5.0 / 60.0
 const TILE_SIZE := 34.0
 const HUD_HEIGHT := 86.0
 const EFFECT_SECONDS := 0.32
@@ -28,6 +29,8 @@ var previous_rock_tiles: Dictionary = {}
 var last_event_key := ""
 var animated_effects: Array[Dictionary] = []
 var display_positions: Dictionary = {}
+var direction_press_order: Dictionary = {}
+var direction_press_counter := 0
 var shake_timer := 0.0
 var winner_panel: PanelContainer
 var winner_label: Label
@@ -50,9 +53,26 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_update_effects(delta)
 	_update_predicted_digs(delta)
+	_update_prediction_delay(delta)
 	shake_timer = max(0.0, shake_timer - delta)
 	_update_movement_input(delta)
 	queue_redraw()
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		if key_event.echo:
+			return
+		var direction_name := _direction_name_for_key(key_event.physical_keycode)
+		if direction_name == "":
+			direction_name = _direction_name_for_key(key_event.keycode)
+		if direction_name == "":
+			return
+		if key_event.pressed:
+			direction_press_counter += 1
+			direction_press_order[direction_name] = direction_press_counter
+		else:
+			direction_press_order.erase(direction_name)
 
 func _build_ui() -> void:
 	hud_label = Label.new()
@@ -347,18 +367,59 @@ func _update_movement_input(delta: float) -> void:
 		repeat_timer += INPUT_REPEAT_INTERVAL
 
 func _pressed_direction() -> Vector2:
-	var movement := Vector2.ZERO
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
-		movement.x -= 1
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
-		movement.x += 1
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP):
-		movement.y -= 1
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
-		movement.y += 1
-	if abs(movement.x) > 0.0:
-		movement.y = 0.0
-	return movement
+	var best_name := ""
+	var best_order := -1
+	for direction_name in ["left", "right", "up", "down"]:
+		if not _direction_is_pressed(direction_name):
+			direction_press_order.erase(direction_name)
+			continue
+		if not direction_press_order.has(direction_name):
+			direction_press_counter += 1
+			direction_press_order[direction_name] = direction_press_counter
+		var order := int(direction_press_order[direction_name])
+		if order > best_order:
+			best_order = order
+			best_name = direction_name
+	return _direction_vector(best_name)
+
+func _direction_name_for_key(keycode: int) -> String:
+	match keycode:
+		KEY_A, KEY_LEFT:
+			return "left"
+		KEY_D, KEY_RIGHT:
+			return "right"
+		KEY_W, KEY_UP:
+			return "up"
+		KEY_S, KEY_DOWN:
+			return "down"
+		_:
+			return ""
+
+func _direction_is_pressed(direction_name: String) -> bool:
+	match direction_name:
+		"left":
+			return Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)
+		"right":
+			return Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT)
+		"up":
+			return Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP)
+		"down":
+			return Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN)
+		_:
+			return false
+
+func _direction_vector(direction_name: String) -> Vector2:
+	match direction_name:
+		"left":
+			return Vector2.LEFT
+		"right":
+			return Vector2.RIGHT
+		"up":
+			return Vector2.UP
+		"down":
+			return Vector2.DOWN
+		_:
+			return Vector2.ZERO
 
 func _send_movement_step(movement: Vector2) -> void:
 	input_sequence += 1
@@ -370,7 +431,7 @@ func _predict_movement_step(movement: Vector2, sequence: int) -> void:
 	var local := _local_player(state)
 	if local.is_empty() or bool(local.get("out", false)) or bool(local.get("escaped", false)) or not bool(local.get("alive", true)):
 		return
-	var start := predicted_tile if has_prediction else Vector2(float(local.get("x", 0)), float(local.get("y", 0)))
+	var start := _planned_prediction_tile(local)
 	var target := start + movement
 	if not _can_predict_tile(state, int(target.x), int(target.y)):
 		_show_blocked_prediction(target)
@@ -381,14 +442,21 @@ func _predict_movement_step(movement: Vector2, sequence: int) -> void:
 			"y": int(target.y),
 			"life": 0.22
 		}
-	if not has_prediction:
+	if not has_prediction and pending_predictions.is_empty():
 		prediction_base_tile = start
-	has_prediction = true
-	predicted_tile = target
 	pending_predictions.append({
 		"sequence": sequence,
-		"to": target
+		"to": target,
+		"delay": INPUT_VISUAL_DELAY_SECONDS
 	})
+
+func _planned_prediction_tile(local: Dictionary) -> Vector2:
+	if not pending_predictions.is_empty():
+		var last_move: Dictionary = pending_predictions[pending_predictions.size() - 1]
+		return last_move.get("to", Vector2(float(local.get("x", 0)), float(local.get("y", 0))))
+	if has_prediction:
+		return predicted_tile
+	return Vector2(float(local.get("x", 0)), float(local.get("y", 0)))
 
 func _can_predict_tile(state: Dictionary, x: int, y: int) -> bool:
 	var cave: Dictionary = state.get("cave", {})
@@ -486,6 +554,22 @@ func _update_predicted_digs(delta: float) -> void:
 			predicted_dig_tiles.erase(key)
 		else:
 			predicted_dig_tiles[key] = dig
+
+func _update_prediction_delay(delta: float) -> void:
+	if pending_predictions.is_empty():
+		return
+	var newest_ready_tile := predicted_tile
+	var has_ready_move := false
+	for index in range(pending_predictions.size()):
+		var move: Dictionary = pending_predictions[index]
+		move["delay"] = max(0.0, float(move.get("delay", 0.0)) - delta)
+		pending_predictions[index] = move
+		if float(move["delay"]) <= 0.0:
+			newest_ready_tile = move.get("to", newest_ready_tile)
+			has_ready_move = true
+	if has_ready_move:
+		predicted_tile = newest_ready_tile
+		has_prediction = true
 
 func _local_player(state: Dictionary) -> Dictionary:
 	return _player_by_id(state, NetworkManager.player_id)

@@ -16,6 +16,7 @@ const ROCK := 3
 const GEM := 4
 const EXIT := 5
 const RUBY := 6
+const BOMB := 7
 
 var game: Dictionary = {}
 var held_direction := Vector2.ZERO
@@ -86,7 +87,7 @@ func _build_ui() -> void:
 	add_child(hud_label)
 
 	controls_label = Label.new()
-	controls_label.text = "WASD / Arrow keys move and dig | collect gems | escape when the exit opens | avoid rocks and slimes"
+	controls_label.text = "WASD / Arrow keys move and dig | collect gems | escape when the exit opens | avoid rocks, bombs, quakes, and slimes"
 	controls_label.offset_left = 18
 	controls_label.offset_top = 48
 	add_child(controls_label)
@@ -152,6 +153,7 @@ func _build_sfx() -> void:
 		"loot_recover": "res://assets/sfx/gem_clink.wav",
 		"exit_unlocked": "res://assets/sfx/gem_clink.wav",
 		"rock_impact": "res://assets/sfx/rock_boom.wav",
+		"bomb_explode": "res://assets/sfx/rock_boom.wav",
 		"player_hit": "res://assets/sfx/rock_boom.wav",
 		"slime_hit": "res://assets/sfx/rock_boom.wav",
 		"earthquake": "res://assets/sfx/earthquake_warning.wav"
@@ -183,7 +185,7 @@ func _draw_tiles(origin: Vector2, scale: float, state: Dictionary) -> void:
 						_draw_predicted_dig(rect, predicted_dig_tiles[_pos_key(x, y)])
 					else:
 						_draw_dirt(rect, x, y)
-				ROCK:
+				ROCK, BOMB:
 					_draw_empty(rect, x, y)
 				GEM:
 					_draw_gem(rect, Color(0.76, 0.90, 1.0), Color(0.30, 0.43, 0.80))
@@ -239,12 +241,27 @@ func _draw_rocks(origin: Vector2, scale: float, state: Dictionary) -> void:
 	var tiles: Array = cave.get("tiles", [])
 	for y in range(height):
 		for x in range(width):
-			if int(tiles[y * width + x]) != ROCK:
+			var tile := int(tiles[y * width + x])
+			if tile != ROCK and tile != BOMB:
 				continue
 			var key := "rock_%s" % _pos_key(x, y)
 			var center := _smoothed_tile_center(origin, scale, key, float(x), float(y), 0.68)
 			var rect := Rect2(center - Vector2(TILE_SIZE, TILE_SIZE) * scale * 0.5, Vector2(TILE_SIZE, TILE_SIZE) * scale)
-			_draw_rock(rect, state)
+			if tile == BOMB:
+				_draw_bomb(rect, state)
+			else:
+				_draw_rock(rect, state)
+
+func _draw_bomb(rect: Rect2, state: Dictionary) -> void:
+	var center := rect.get_center()
+	if int(state.get("tick", 0)) % 8 < 3:
+		draw_circle(center, rect.size.x * 0.48, Color(1.0, 0.24, 0.12, 0.12))
+	draw_circle(center, rect.size.x * 0.34, Color(0.08, 0.08, 0.085))
+	draw_circle(center + Vector2(-0.10, -0.12) * rect.size, rect.size.x * 0.12, Color(0.18, 0.18, 0.19, 0.85))
+	draw_arc(center, rect.size.x * 0.34, 0.0, TAU, 18, Color(0.34, 0.30, 0.26), 2.0)
+	draw_rect(Rect2(center + Vector2(0.06, -0.46) * rect.size, Vector2(0.16, 0.16) * rect.size), Color(0.42, 0.30, 0.17))
+	draw_line(center + Vector2(0.18, -0.42) * rect.size, center + Vector2(0.34, -0.58) * rect.size, Color(0.87, 0.54, 0.18), 2.0)
+	draw_circle(center + Vector2(0.38, -0.62) * rect.size, rect.size.x * 0.06, Color(1.0, 0.78, 0.28))
 
 func _draw_predicted_dig(rect: Rect2, dig: Dictionary) -> void:
 	var life := float(dig.get("life", 0.0))
@@ -317,6 +334,11 @@ func _draw_effects(origin: Vector2, scale: float) -> void:
 				draw_rect(Rect2(pos - Vector2(12, 12) * scale, Vector2(24, 24) * scale), Color(1.0, 0.18, 0.08, 0.36 * alpha), false, 2.0)
 			"player_hit", "slime_hit":
 				draw_circle(pos, (18.0 + t * 15.0) * scale, Color(1.0, 0.08, 0.04, 0.32 * alpha))
+			"bomb_explode":
+				draw_circle(pos, (22.0 + t * 28.0) * scale, Color(1.0, 0.28, 0.06, 0.44 * alpha))
+				draw_circle(pos, (9.0 + t * 18.0) * scale, Color(1.0, 0.86, 0.28, 0.35 * alpha))
+			"earthquake":
+				draw_rect(Rect2(pos - Vector2(18, 18) * scale, Vector2(36, 36) * scale), Color(0.70, 0.48, 0.22, 0.28 * alpha), false, 3.0)
 			"rock_impact", "loot_drop":
 				draw_circle(pos, (12.0 + t * 20.0) * scale, Color(0.64, 0.57, 0.45, 0.35 * alpha))
 
@@ -497,7 +519,7 @@ func _can_predict_tile(state: Dictionary, x: int, y: int) -> bool:
 		if int(slime.get("x", -1)) == x and int(slime.get("y", -1)) == y:
 			return false
 	var tile := _tile_at(state, x, y)
-	return tile != WALL and tile != ROCK
+	return tile != WALL and tile != ROCK and tile != BOMB
 
 func _tile_at(state: Dictionary, x: int, y: int) -> int:
 	var cave: Dictionary = state.get("cave", {})
@@ -535,7 +557,9 @@ func _on_game_over(next_game: Dictionary, winner_id: String) -> void:
 			winner_name = player.get("displayName", "Winner")
 	winner_label.text = "%s wins!" % winner_name
 	var winner_state := _player_by_id(next_game.get("lootAndLeave", {}), winner_id)
-	winner_detail_label.text = "Banked cash: $%s" % winner_state.get("bankedCash", 0)
+	var final_cash := int(winner_state.get("bankedCash", 0)) + int(winner_state.get("carriedCash", 0))
+	var reason := str(next_game.get("lootAndLeave", {}).get("lastEvent", {}).get("message", "Expedition over."))
+	winner_detail_label.text = "%s\nFinal cash: $%s" % [reason, final_cash]
 	winner_panel.visible = true
 	return_button.visible = NetworkManager.room.host_id == NetworkManager.player_id
 
@@ -562,7 +586,7 @@ func _record_event(next_game: Dictionary) -> void:
 		"y": int(event.get("y", 0)),
 		"life": EFFECT_SECONDS
 	})
-	if ["player_hit", "slime_hit", "rock_impact"].has(str(event.get("type", ""))):
+	if ["player_hit", "slime_hit", "rock_impact", "bomb_explode", "earthquake"].has(str(event.get("type", ""))):
 		shake_timer = EFFECT_SECONDS
 	_play_event_sound(str(event.get("type", "")), str(event.get("message", "")))
 
@@ -682,7 +706,8 @@ func _rock_tiles(state: Dictionary) -> Dictionary:
 	var tiles: Array = cave.get("tiles", [])
 	for y in range(height):
 		for x in range(width):
-			if int(tiles[y * width + x]) == ROCK:
+			var tile := int(tiles[y * width + x])
+			if tile == ROCK or tile == BOMB:
 				rocks[_pos_key(x, y)] = Vector2(float(x), float(y))
 	return rocks
 

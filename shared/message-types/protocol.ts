@@ -129,7 +129,9 @@ export type LootAndLeaveEvent = {
     | "loot_recover"
     | "player_hit"
     | "rock_impact"
+    | "bomb_explode"
     | "slime_hit"
+    | "earthquake"
     | "exit_unlocked"
     | "escaped"
     | "level_start"
@@ -155,6 +157,8 @@ export type LootAndLeaveState = {
   gemsCollected: number;
   threatLevel: number;
   earthquakeWarning: boolean;
+  nextEarthquakeTick: number;
+  earthquakeWarningTick: number;
   message: string;
   lastEvent?: LootAndLeaveEvent;
 };

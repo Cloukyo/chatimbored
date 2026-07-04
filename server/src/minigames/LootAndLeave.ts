@@ -21,6 +21,7 @@ import type { Minigame } from "./Minigame.js";
 
 const T = LOOT_AND_LEAVE_TILES;
 const WOBBLE_TICKS = 3;
+const EARTHQUAKE_WARNING_TICKS = 24;
 const SLIME_TICK_INTERVAL = 6;
 const SLIME_HIT_COOLDOWN_TICKS = 12;
 const MAX_THREAT_LEVEL = 5;
@@ -93,7 +94,7 @@ export const lootAndLeave: Minigame = {
     room.game.winnerId = room.game.winnerId ?? winnerId(room.game.lootAndLeave.players);
     room.players.forEach((player) => {
       const state = room.game?.lootAndLeave?.players.find((candidate) => candidate.id === player.id);
-      player.score = state?.bankedCash ?? 0;
+      player.score = (state?.bankedCash ?? 0) + (state?.carriedCash ?? 0);
       player.isReady = false;
     });
     roomInputs.delete(room.code);
@@ -108,9 +109,17 @@ function step(room: Room, game: LootAndLeaveState): void {
 
   applyPlayerCommands(room, game);
   updateThreat(game);
+  applyEarthquake(game);
   applyGravity(game);
   updateSlimes(game);
   checkExit(game);
+
+  const standing = game.players.filter((player) => player.alive && !player.out && !player.escaped);
+  if (standing.length === 1 && game.players.some((player) => player.out)) {
+    room.game!.winnerId = standing[0]!.id;
+    game.lastEvent = event("match_over", "Last explorer standing.", standing[0]!.x, standing[0]!.y, standing[0]!.id);
+    return;
+  }
 
   if (game.players.every((player) => player.out)) {
     room.game!.winnerId = winnerId(game.players);
@@ -120,6 +129,11 @@ function step(room: Room, game: LootAndLeaveState): void {
 
   const active = game.players.filter((player) => !player.out);
   if (active.length > 0 && active.every((player) => player.escaped)) {
+    if (game.level >= 5) {
+      room.game!.winnerId = winnerId(game.players);
+      game.lastEvent = event("match_over", "Level five cleared.");
+      return;
+    }
     const next = createLevel(
       game.players.map((player) => player.id),
       game.level + 1,
@@ -162,7 +176,7 @@ function tryMove(game: LootAndLeaveState, player: LootAndLeavePlayerState, direc
   }
 
   const tile = getTile(game, target.x, target.y);
-  if (tile === T.WALL || tile === T.ROCK) return;
+  if (tile === T.WALL || tile === T.ROCK || tile === T.BOMB) return;
   if (tile === T.DIRT) {
     setTile(game, target.x, target.y, T.EMPTY);
     player.moveCooldownTicks = 1;
@@ -185,7 +199,8 @@ function applyGravity(game: LootAndLeaveState): void {
   for (let y = game.cave.height - 2; y >= 1; y -= 1) {
     for (let x = 1; x < game.cave.width - 1; x += 1) {
       const key = posKey(x, y);
-      if (moved.has(key) || getTile(game, x, y) !== T.ROCK) continue;
+      const tile = getTile(game, x, y);
+      if (moved.has(key) || !isFallingObject(tile)) continue;
       const below = { x, y: y + 1 };
       const rock = game as LootAndLeaveState & { rockWobbleTicks?: Record<string, number>; fallingRocks?: Record<string, boolean> };
       rock.rockWobbleTicks ??= {};
@@ -195,46 +210,56 @@ function applyGravity(game: LootAndLeaveState): void {
       const belowTile = getTile(game, below.x, below.y);
 
       if (player && isFalling) {
-        damagePlayer(game, player, "player_hit");
-        moveRock(game, x, y, below.x, below.y, false, moved);
+        if (tile === T.BOMB) explodeBomb(game, x, y);
+        else {
+          damagePlayer(game, player, "player_hit");
+          moveRock(game, x, y, below.x, below.y, false, moved, tile);
+        }
       } else if (player) {
         delete rock.rockWobbleTicks[key];
         delete rock.fallingRocks[key];
       } else if (slimeAt(game, below.x, below.y) && isFalling) {
-        game.slimes = game.slimes.filter((slime) => slime.x !== below.x || slime.y !== below.y);
-        moveRock(game, x, y, below.x, below.y, false, moved);
+        if (tile === T.BOMB) explodeBomb(game, x, y);
+        else {
+          game.slimes = game.slimes.filter((slime) => slime.x !== below.x || slime.y !== below.y);
+          moveRock(game, x, y, below.x, below.y, false, moved, tile);
+        }
       } else if (belowTile === T.EMPTY) {
         const wobble = rock.rockWobbleTicks[key] ?? 0;
         if (isFalling || wobble >= WOBBLE_TICKS) {
-          moveRock(game, x, y, below.x, below.y, true, moved);
+          moveRock(game, x, y, below.x, below.y, true, moved, tile);
         } else {
           rock.rockWobbleTicks[key] = wobble + 1;
         }
       } else {
-        if (isFalling) game.lastEvent = event("rock_impact", "Rock landed.", x, y);
-        delete rock.rockWobbleTicks[key];
-        delete rock.fallingRocks[key];
-        tryRollRock(game, x, y, belowTile, moved);
+        if (tile === T.BOMB && isFalling) {
+          explodeBomb(game, x, y);
+        } else {
+          if (isFalling) game.lastEvent = event("rock_impact", "Rock landed.", x, y);
+          delete rock.rockWobbleTicks[key];
+          delete rock.fallingRocks[key];
+          tryRollRock(game, x, y, belowTile, moved, tile);
+        }
       }
     }
   }
 }
 
-function tryRollRock(game: LootAndLeaveState, x: number, y: number, belowTile: number, moved: Set<string>): void {
+function tryRollRock(game: LootAndLeaveState, x: number, y: number, belowTile: number, moved: Set<string>, tile: number): void {
   if (!canRollOff(belowTile)) return;
   const directions = (game.seed + game.tick + x + y) % 2 === 0 ? [1, -1] : [-1, 1];
   for (const dx of directions) {
     const side = { x: x + dx, y };
     const diagonal = { x: x + dx, y: y + 1 };
     if (isClearForRock(game, side.x, side.y) && isClearForRock(game, diagonal.x, diagonal.y)) {
-      moveRock(game, x, y, side.x, side.y, true, moved);
+      moveRock(game, x, y, side.x, side.y, true, moved, tile);
       return;
     }
   }
 }
 
 function canRollOff(tile: number): boolean {
-  return tile === T.ROCK || tile === T.GEM || tile === T.RUBY || tile === T.WALL || tile === T.DIRT;
+  return tile === T.ROCK || tile === T.BOMB || tile === T.GEM || tile === T.RUBY || tile === T.WALL || tile === T.DIRT;
 }
 
 function isClearForRock(game: LootAndLeaveState, x: number, y: number): boolean {
@@ -249,6 +274,7 @@ function moveRock(
   toY: number,
   falling: boolean,
   moved: Set<string>,
+  tile: number,
 ): void {
   const rock = game as LootAndLeaveState & { rockWobbleTicks?: Record<string, number>; fallingRocks?: Record<string, boolean> };
   rock.rockWobbleTicks ??= {};
@@ -256,10 +282,34 @@ function moveRock(
   delete rock.rockWobbleTicks[posKey(fromX, fromY)];
   delete rock.fallingRocks[posKey(fromX, fromY)];
   setTile(game, fromX, fromY, T.EMPTY);
-  setTile(game, toX, toY, T.ROCK);
+  setTile(game, toX, toY, tile);
   moved.add(posKey(toX, toY));
   if (falling) rock.fallingRocks[posKey(toX, toY)] = true;
   else game.lastEvent = event("rock_impact", "Rock landed.", toX, toY);
+}
+
+function isFallingObject(tile: number): boolean {
+  return tile === T.ROCK || tile === T.BOMB;
+}
+
+function explodeBomb(game: LootAndLeaveState, x: number, y: number): void {
+  const rock = game as LootAndLeaveState & { rockWobbleTicks?: Record<string, number>; fallingRocks?: Record<string, boolean> };
+  rock.rockWobbleTicks ??= {};
+  rock.fallingRocks ??= {};
+  for (let py = y - 1; py <= y + 1; py += 1) {
+    for (let px = x - 1; px <= x + 1; px += 1) {
+      if (!inBounds(game, px, py)) continue;
+      const tile = getTile(game, px, py);
+      if (tile === T.WALL || tile === T.EXIT) continue;
+      const player = playerAt(game, px, py);
+      if (player) damagePlayer(game, player, "player_hit");
+      game.slimes = game.slimes.filter((slime) => slime.x !== px || slime.y !== py);
+      delete rock.rockWobbleTicks[posKey(px, py)];
+      delete rock.fallingRocks[posKey(px, py)];
+      setTile(game, px, py, T.EMPTY);
+    }
+  }
+  game.lastEvent = event("bomb_explode", "Bomb exploded.", x, y);
 }
 
 function updateSlimes(game: LootAndLeaveState): void {
@@ -311,7 +361,7 @@ function damagePlayer(game: LootAndLeaveState, player: LootAndLeavePlayerState, 
 }
 
 function recoverLootBag(game: LootAndLeaveState, player: LootAndLeavePlayerState): void {
-  const bag = game.lootBags.find((candidate) => candidate.ownerId === player.id && candidate.x === player.x && candidate.y === player.y);
+  const bag = game.lootBags.find((candidate) => candidate.x === player.x && candidate.y === player.y);
   if (!bag) return;
   player.carriedCash += bag.cash;
   game.lootBags = game.lootBags.filter((candidate) => candidate !== bag);
@@ -365,10 +415,12 @@ function createLevel(
 
   const gemTarget = 12 + level * 4 + playerIds.length * 3;
   const rockTarget = 10 + level * 7;
-  const slimeTarget = level;
+  const bombTarget = level + 1;
+  const slimeTarget = level + 1;
   placeTiles(cave, rng, gemTarget, T.GEM, spawn, exit);
   placeTiles(cave, rng, Math.max(1, level), T.RUBY, spawn, exit);
   placeRocks(cave, rng, rockTarget, spawn, exit);
+  placeBombs(cave, rng, bombTarget, spawn, exit);
 
   const players = playerIds.map((id, index) => {
     const previous = previousPlayers.find((candidate) => candidate.id === id);
@@ -411,9 +463,26 @@ function createLevel(
     gemsCollected: 0,
     threatLevel: 0,
     earthquakeWarning: false,
+    nextEarthquakeTick: scheduleEarthquakeTick(0, level, 0, seed),
+    earthquakeWarningTick: Math.max(1, scheduleEarthquakeTick(0, level, 0, seed) - EARTHQUAKE_WARNING_TICKS),
     message: `Level ${level}. Grab loot and find the exit.`,
     lastEvent: event("level_start", `Level ${level}.`),
   };
+}
+
+function placeBombs(cave: LootAndLeaveState["cave"], rng: () => number, count: number, spawn: { x: number; y: number }, exit: { x: number; y: number }): void {
+  let placed = 0;
+  let attempts = 0;
+  while (placed < count && attempts < 5000) {
+    attempts += 1;
+    const x = 2 + Math.floor(rng() * (cave.width - 4));
+    const y = 2 + Math.floor(rng() * (cave.height - 5));
+    if (distance({ x, y }, spawn) < 6 || distance({ x, y }, exit) < 4) continue;
+    if (cave.tiles[y * cave.width + x] !== T.DIRT) continue;
+    if (cave.tiles[(y + 1) * cave.width + x] !== T.DIRT && cave.tiles[(y + 1) * cave.width + x] !== T.WALL) continue;
+    cave.tiles[y * cave.width + x] = T.BOMB;
+    placed += 1;
+  }
 }
 
 function chooseCornerExit(rng: () => number, width: number, height: number): { x: number; y: number } {
@@ -513,10 +582,114 @@ function updateThreat(game: LootAndLeaveState): void {
     game.threatLevel = next;
     game.message = `Threat ${next}. The cave is waking up.`;
   }
-  if (game.threatLevel > 0 && game.tick % Math.max(45, 180 - game.level * 12 - game.threatLevel * 18) === 0) {
-    game.earthquakeWarning = true;
-    game.lastEvent = event("rock_impact", "The cave trembles...");
+}
+
+function applyEarthquake(game: LootAndLeaveState): void {
+  if (game.nextEarthquakeTick <= 0) {
+    scheduleNextEarthquake(game);
+    return;
   }
+  if (game.tick >= game.earthquakeWarningTick && game.tick < game.nextEarthquakeTick) {
+    game.earthquakeWarning = true;
+    if (!game.lastEvent) game.lastEvent = event("earthquake", "The cave trembles...");
+    return;
+  }
+  if (game.tick < game.nextEarthquakeTick) return;
+
+  const quake = shatterDirtClusters(game);
+  scheduleNextEarthquake(game);
+  game.earthquakeWarning = false;
+  game.lastEvent = event(
+    "earthquake",
+    quake.broken > 0 ? `Earthquake! ${quake.broken} tiles crumbled.` : "Earthquake!",
+    quake.x,
+    quake.y,
+  );
+}
+
+function scheduleNextEarthquake(game: LootAndLeaveState): void {
+  game.nextEarthquakeTick = scheduleEarthquakeTick(game.tick, game.level, game.threatLevel, game.seed);
+  game.earthquakeWarningTick = Math.max(game.tick + 1, game.nextEarthquakeTick - EARTHQUAKE_WARNING_TICKS);
+}
+
+function scheduleEarthquakeTick(tick: number, level: number, threatLevel: number, seed: number): number {
+  const interval = Math.max(55, 230 - level * 18 - threatLevel * 24);
+  return tick + interval + Math.floor(seededNoise(seed + tick * 19 + level * 37 + threatLevel * 53) * 24);
+}
+
+function shatterDirtClusters(game: LootAndLeaveState): { broken: number; x?: number; y?: number } {
+  const clusters = 1 + Math.floor(game.threatLevel / 2) + Math.floor(Math.max(game.level - 1, 0) / 2);
+  let broken = 0;
+  let firstCenter: { x: number; y: number } | undefined;
+  for (let i = 0; i < clusters; i += 1) {
+    const center = chooseQuakeCenter(game, i);
+    if (!center) continue;
+    firstCenter ??= center;
+    broken += clearQuakeCluster(game, center, i);
+  }
+  return { broken, x: firstCenter?.x, y: firstCenter?.y };
+}
+
+function chooseQuakeCenter(game: LootAndLeaveState, salt: number): { x: number; y: number } | undefined {
+  const bombs = bombPositions(game);
+  if (bombs.length > 0) {
+    const bomb = bombs[Math.floor(seededNoise(game.seed + game.tick * 31 + salt) * bombs.length)]!;
+    for (const offset of [
+      { x: 0, y: 1 },
+      { x: -1, y: 0 },
+      { x: 1, y: 0 },
+      { x: 0, y: -1 },
+      { x: -1, y: 1 },
+      { x: 1, y: 1 },
+    ]) {
+      const pos = { x: bomb.x + offset.x, y: bomb.y + offset.y };
+      if (isSafeDirtToCrumble(game, pos.x, pos.y)) return pos;
+    }
+  }
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const noise = seededNoise(game.seed + game.tick * 101 + salt * 997 + attempt * 17);
+    const x = 1 + Math.floor(noise * (game.cave.width - 2));
+    const y = 1 + Math.floor(seededNoise(game.seed + game.tick * 131 + salt * 571 + attempt * 29) * (game.cave.height - 2));
+    if (isSafeDirtToCrumble(game, x, y)) return { x, y };
+  }
+  return undefined;
+}
+
+function clearQuakeCluster(game: LootAndLeaveState, center: { x: number; y: number }, salt: number): number {
+  let broken = 0;
+  const offsets = [
+    { x: 0, y: 0 },
+    { x: -1, y: 0 },
+    { x: 1, y: 0 },
+    { x: 0, y: -1 },
+    { x: 0, y: 1 },
+  ];
+  offsets.forEach((offset, index) => {
+    if (index > 0 && seededNoise(game.seed + game.tick * 71 + salt * 11 + index * 23) > 0.62) return;
+    const x = center.x + offset.x;
+    const y = center.y + offset.y;
+    if (!isSafeDirtToCrumble(game, x, y)) return;
+    setTile(game, x, y, T.EMPTY);
+    broken += 1;
+  });
+  return broken;
+}
+
+function isSafeDirtToCrumble(game: LootAndLeaveState, x: number, y: number): boolean {
+  if (!inBounds(game, x, y) || getTile(game, x, y) !== T.DIRT) return false;
+  if (playerAt(game, x, y) || (game.exit.x === x && game.exit.y === y)) return false;
+  if (game.players.some((player) => player.spawnX === x && player.spawnY === y)) return false;
+  return true;
+}
+
+function bombPositions(game: LootAndLeaveState): { x: number; y: number }[] {
+  const bombs: { x: number; y: number }[] = [];
+  for (let y = 1; y < game.cave.height - 1; y += 1) {
+    for (let x = 1; x < game.cave.width - 1; x += 1) {
+      if (getTile(game, x, y) === T.BOMB) bombs.push({ x, y });
+    }
+  }
+  return bombs;
 }
 
 function nearestVulnerablePlayer(game: LootAndLeaveState, slime: LootAndLeaveSlimeState): LootAndLeavePlayerState | undefined {

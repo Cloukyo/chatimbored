@@ -66,7 +66,7 @@ function advanceMoveCooldown(room: Room): void {
   lootAndLeave.update!(room, 50);
 }
 
-test("setup creates a level one cave for two to four players with one slime", () => {
+test("setup creates a level one cave for two to four players with two slimes", () => {
   const room = setupRoom(3);
   const game = state(room);
 
@@ -75,7 +75,7 @@ test("setup creates a level one cave for two to four players with one slime", ()
   assert.equal(game.level, 1);
   assert.equal(game.players.length, 3);
   assert.equal(game.players.every((player) => player.lives === 3), true);
-  assert.equal(game.slimes.length, 1);
+  assert.equal(game.slimes.length, 2);
   assert.equal(game.cave.width, 44);
   assert.equal(game.cave.height, 23);
   assert.ok(game.cave.tiles.length === game.cave.width * game.cave.height);
@@ -126,6 +126,23 @@ test("later levels increase danger with more rocks and slimes", () => {
   assert.equal(second.level, 2);
   assert.ok(secondRocks > firstRocks);
   assert.ok(second.slimes.length > firstSlimes);
+});
+
+test("later levels increase bomb count", () => {
+  const room = setupRoom();
+  const first = state(room);
+  const firstBombs = first.cave.tiles.filter((tile) => tile === 7).length;
+
+  first.players.forEach((player) => {
+    player.escaped = true;
+  });
+  lootAndLeave.update!(room, 50);
+
+  const second = state(room);
+  const secondBombs = second.cave.tiles.filter((tile) => tile === 7).length;
+
+  assert.ok(firstBombs > 0);
+  assert.ok(secondBombs > firstBombs);
 });
 
 test("movement enters empty tiles and digging clears dirt with a short cooldown", () => {
@@ -273,6 +290,57 @@ test("falling rocks can roll sideways off supported obstacles", () => {
   assert.equal(getTile(game.cave, 9, 6), 3);
 });
 
+test("rocks wobble before falling", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 2, 2);
+  setTile(game.cave, 10, 6, 3);
+  setTile(game.cave, 10, 7, 0);
+
+  lootAndLeave.update!(room, 50);
+
+  assert.equal(getTile(game.cave, 10, 6), 3);
+  assert.equal(getTile(game.cave, 10, 7), 0);
+});
+
+test("falling bombs explode on impact and clear nearby soft tiles", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 2, 2);
+  setTile(game.cave, 10, 5, 7);
+  setTile(game.cave, 10, 6, 0);
+  setTile(game.cave, 10, 7, 1);
+  setTile(game.cave, 9, 6, 2);
+
+  for (let i = 0; i < 5; i += 1) lootAndLeave.update!(room, 50);
+
+  assert.equal(getTile(game.cave, 10, 6), 0);
+  assert.equal(getTile(game.cave, 9, 6), 0);
+  assert.equal(game.lastEvent?.type, "bomb_explode");
+});
+
+test("earthquakes crumble cave tiles and prefer areas near bombs", () => {
+  const room = setupRoom();
+  const game = state(room);
+  placePlayerForTest(game, "p1", 2, 2);
+  game.threatLevel = 1;
+  game.nextEarthquakeTick = game.tick + 1;
+  game.earthquakeWarningTick = game.tick;
+  game.cave.tiles = game.cave.tiles.map((tile) => (tile === 7 ? 2 : tile));
+  setTile(game.cave, 12, 8, 7);
+  setTile(game.cave, 12, 9, 2);
+  setTile(game.cave, 11, 8, 2);
+  setTile(game.cave, 13, 8, 2);
+
+  lootAndLeave.update!(room, 50);
+
+  assert.equal(game.lastEvent?.type, "earthquake");
+  assert.equal(
+    [getTile(game.cave, 12, 9), getTile(game.cave, 11, 8), getTile(game.cave, 13, 8)].some((tile) => tile === 0),
+    true,
+  );
+});
+
 test("gem pickup adds carried cash and unlocking exit depends on collected gems", () => {
   const room = setupRoom();
   const game = state(room);
@@ -324,17 +392,17 @@ test("death drops carried cash into an ownable loot bag and resets carried cash"
   assert.equal(game.lootBags[0].cash, 500);
 });
 
-test("recovering your own loot bag restores carried cash", () => {
+test("any player can recover dropped loot bags", () => {
   const room = setupRoom();
   const game = state(room);
-  placePlayerForTest(game, "p1", 5, 5);
+  placePlayerForTest(game, "p2", 5, 5);
   setTile(game.cave, 6, 5, 0);
   game.lootBags = [{ id: "bag_p1", ownerId: "p1", x: 6, y: 5, cash: 250 }];
 
-  lootAndLeave.handleInput(room, "p1", input({ movement: { x: 1, y: 0 } }));
+  lootAndLeave.handleInput(room, "p2", input({ movement: { x: 1, y: 0 } }));
   lootAndLeave.update!(room, 50);
 
-  assert.equal(game.players[0].carriedCash, 250);
+  assert.equal(game.players[1].carriedCash, 250);
   assert.equal(game.lootBags.length, 0);
 });
 
@@ -376,6 +444,35 @@ test("match ends when everyone is out and winner is highest banked cash", () => 
 
   assert.equal(room.game!.winnerId, "p2");
   assert.equal(room.players.find((player) => player.id === "p2")?.score, 400);
+});
+
+test("match ends when only one player remains standing", () => {
+  const room = setupRoom();
+  const game = state(room);
+  game.players[0].bankedCash = 100;
+  game.players[1].bankedCash = 500;
+  game.players[1].alive = false;
+  game.players[1].out = true;
+
+  lootAndLeave.update!(room, 50);
+
+  assert.equal(room.game?.winnerId, "p1");
+  assert.equal(game.lastEvent?.type, "match_over");
+});
+
+test("escaping level five ends the match with highest cash as winner", () => {
+  const room = setupRoom();
+  const game = state(room);
+  game.level = 5;
+  game.players[0].escaped = true;
+  game.players[0].bankedCash = 300;
+  game.players[1].escaped = true;
+  game.players[1].bankedCash = 700;
+
+  lootAndLeave.update!(room, 50);
+
+  assert.equal(room.game?.winnerId, "p2");
+  assert.equal(game.lastEvent?.type, "match_over");
 });
 
 test("existing minigames still expose their ids", () => {

@@ -28,4 +28,5 @@ export const LOOT_AND_LEAVE_TILES = {
   GEM: 4,
   EXIT: 5,
   RUBY: 6,
+  BOMB: 7,
 } as const;

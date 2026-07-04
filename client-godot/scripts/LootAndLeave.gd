@@ -1,8 +1,10 @@
 extends Control
 
-const INPUT_REPEAT_INTERVAL := 0.11
+const INPUT_REPEAT_INTERVAL := 0.09
 const INPUT_BUFFER_SECONDS := 0.15
-const INPUT_VISUAL_DELAY_SECONDS := 2.0 / 60.0
+const INPUT_VISUAL_DELAY_SECONDS := 1.0 / 60.0
+const LOCAL_MOVE_TILES_PER_SECOND := 1.0 / INPUT_REPEAT_INTERVAL
+const REMOTE_MOVE_TILES_PER_SECOND := 9.5
 const TILE_SIZE := 34.0
 const HUD_HEIGHT := 86.0
 const EFFECT_SECONDS := 0.32
@@ -36,6 +38,7 @@ var display_positions: Dictionary = {}
 var direction_press_order: Dictionary = {}
 var direction_press_counter := 0
 var shake_timer := 0.0
+var visual_delta := 0.0
 var winner_panel: PanelContainer
 var winner_label: Label
 var winner_detail_label: Label
@@ -55,6 +58,7 @@ func _ready() -> void:
 	queue_redraw()
 
 func _process(delta: float) -> void:
+	visual_delta = delta
 	_update_effects(delta)
 	_update_predicted_digs(delta)
 	_update_prediction_delay(delta)
@@ -311,7 +315,8 @@ func _draw_players(origin: Vector2, scale: float, state: Dictionary) -> void:
 			continue
 		var is_local := str(player.get("id", "")) == NetworkManager.player_id
 		var tile := _visual_tile_for_player(player, is_local)
-		var pos: Vector2 = _smoothed_tile_center(origin, scale, "player_%s" % str(player.get("id", "")), tile.x, tile.y)
+		var move_speed := LOCAL_MOVE_TILES_PER_SECOND if is_local else REMOTE_MOVE_TILES_PER_SECOND
+		var pos: Vector2 = _constant_speed_tile_center(origin, scale, "player_%s" % str(player.get("id", "")), tile.x, tile.y, move_speed)
 		var color := Color(0.90, 0.86, 0.48) if is_local else Color(0.58, 0.66, 0.82)
 		draw_rect(Rect2(pos + Vector2(-7, 2) * scale, Vector2(14, 16) * scale), Color(0.12, 0.12, 0.11))
 		draw_rect(Rect2(pos + Vector2(-9, -8) * scale, Vector2(18, 11) * scale), Color(0.95, 0.72, 0.52))
@@ -759,6 +764,16 @@ func _smoothed_tile_center(origin: Vector2, scale: float, key: String, x: float,
 		display_positions[key] = target
 	var current: Vector2 = display_positions[key]
 	current = current.lerp(target, weight)
+	display_positions[key] = current
+	return origin + (current + Vector2(0.5, 0.5)) * TILE_SIZE * scale
+
+func _constant_speed_tile_center(origin: Vector2, scale: float, key: String, x: float, y: float, tiles_per_second: float) -> Vector2:
+	var target := Vector2(float(x), float(y))
+	if not display_positions.has(key):
+		display_positions[key] = target
+	var current: Vector2 = display_positions[key]
+	var max_step := max(0.0, tiles_per_second * visual_delta)
+	current = current.move_toward(target, max_step)
 	display_positions[key] = current
 	return origin + (current + Vector2(0.5, 0.5)) * TILE_SIZE * scale
 

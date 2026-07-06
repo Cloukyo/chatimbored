@@ -6,6 +6,7 @@ var minigame_label: Label
 var status_label: Label
 var ready_button: Button
 var start_button: Button
+var copy_code_button: Button
 var minigame_selector: OptionButton
 
 func _ready() -> void:
@@ -24,12 +25,21 @@ func _build_ui() -> void:
 	root.add_theme_constant_override("separation", 12)
 	add_child(root)
 
+	var room_row := HBoxContainer.new()
+	room_row.add_theme_constant_override("separation", 12)
+	root.add_child(room_row)
+
 	room_label = Label.new()
 	room_label.add_theme_font_size_override("font_size", 34)
-	root.add_child(room_label)
+	room_row.add_child(room_label)
+
+	copy_code_button = Button.new()
+	copy_code_button.text = "Copy Code"
+	copy_code_button.pressed.connect(_on_copy_code_pressed)
+	room_row.add_child(copy_code_button)
 
 	var share_label := Label.new()
-	share_label.text = "Share link placeholder: copy the room code into chat for now."
+	share_label.text = "Share the room code with friends so they can join."
 	root.add_child(share_label)
 
 	minigame_label = Label.new()
@@ -68,8 +78,15 @@ func _build_ui() -> void:
 
 func _render() -> void:
 	var room := NetworkManager.room
+	var is_host := room.host_id == NetworkManager.player_id
 	room_label.text = "Room %s" % room.code
-	minigame_label.text = "Selected minigame: %s" % minigame_selector.get_item_text(minigame_selector.selected)
+	copy_code_button.disabled = room.code == ""
+	minigame_selector.disabled = not is_host
+	minigame_selector.tooltip_text = "Only the host can choose the minigame." if not is_host else "Choose the minigame for this room."
+	if is_host:
+		minigame_label.text = "Selected minigame: %s" % minigame_selector.get_item_text(minigame_selector.selected)
+	else:
+		minigame_label.text = "Minigame: the host will choose when starting."
 
 	for child in players_box.get_children():
 		child.queue_free()
@@ -83,6 +100,7 @@ func _render() -> void:
 
 	var local := room.local_player(NetworkManager.player_id)
 	ready_button.text = "Unready" if local.get("isReady", false) else "Ready"
+	start_button.visible = is_host
 	start_button.disabled = not _can_local_host_start()
 
 	if room.phase == "in_game":
@@ -110,7 +128,16 @@ func _on_ready_pressed() -> void:
 	NetworkManager.set_ready(not local.get("isReady", false))
 
 func _on_start_pressed() -> void:
+	if NetworkManager.room.host_id != NetworkManager.player_id:
+		return
 	NetworkManager.start_game(str(minigame_selector.get_selected_metadata()))
+
+func _on_copy_code_pressed() -> void:
+	var code := NetworkManager.room.code
+	if code == "":
+		return
+	DisplayServer.clipboard_set(code)
+	status_label.text = "Room code copied: %s" % code
 
 func _on_room_state_changed(_room: RoomState, _player_id: String) -> void:
 	_render()

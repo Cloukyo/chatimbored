@@ -41,6 +41,7 @@ export type GameSnapshot = {
   winnerId?: string;
   actNatural?: ActNaturalState;
   lootAndLeave?: LootAndLeaveState;
+  silentWitness?: SilentWitnessState;
 };
 
 export type Vector2Payload = {
@@ -88,6 +89,69 @@ export type ActNaturalInput = {
   targetPoint?: Vector2Payload;
   shoot: boolean;
   run: boolean;
+};
+
+export type SilentWitnessRole = "killer" | "hunter";
+export type SilentWitnessResult = "killer" | "hunters";
+export type SilentWitnessNpcStatus = "alive" | "dying" | "dead";
+
+export type SilentWitnessPlayerState = {
+  id: string;
+  role: SilentWitnessRole;
+  x: number;
+  y: number;
+  alive: boolean;
+  shotAvailable: boolean;
+  aim: Vector2Payload;
+  killCooldownMs: number;
+};
+
+export type SilentWitnessNpcState = {
+  id: string;
+  x: number;
+  y: number;
+  state: SilentWitnessNpcStatus;
+  dyingMs: number;
+  speedX: number;
+  speedY: number;
+  behaviorTimer: number;
+};
+
+export type SilentWitnessShotResult = {
+  shooterId: string;
+  start: Vector2Payload;
+  end: Vector2Payload;
+  hitType: "killer" | "hunter" | "npc" | "miss";
+  targetId?: string;
+};
+
+export type SilentWitnessEvent = {
+  type: "kill_marked" | "npc_dead" | "shot" | "killer_hit" | "round_over";
+  x?: number;
+  y?: number;
+  playerId?: string;
+  targetId?: string;
+  message: string;
+};
+
+export type SilentWitnessState = {
+  arena: { width: number; height: number };
+  killerId: string;
+  players: SilentWitnessPlayerState[];
+  npcs: SilentWitnessNpcState[];
+  publicKillCount: number;
+  killTarget: number;
+  result?: SilentWitnessResult;
+  lastShot?: SilentWitnessShotResult;
+  lastEvent?: SilentWitnessEvent;
+};
+
+export type SilentWitnessInput = {
+  movement: Vector2Payload;
+  aim: Vector2Payload;
+  targetPoint?: Vector2Payload;
+  shoot: boolean;
+  kill: boolean;
 };
 
 export type LootAndLeavePlayerState = {
@@ -168,7 +232,7 @@ export type LootAndLeaveInput = {
   sequence?: number;
 };
 
-export type PlayerInputPayload = "PRESS" | ActNaturalInput | LootAndLeaveInput;
+export type PlayerInputPayload = "PRESS" | ActNaturalInput | LootAndLeaveInput | SilentWitnessInput;
 
 export type ClientMessage =
   | { type: "CREATE_ROOM"; displayName: string }

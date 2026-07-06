@@ -41,7 +41,7 @@ export function parseClientMessage(raw: unknown): ClientMessage {
 function readPlayerInput(value: unknown): PlayerInputPayload {
   if (!value || typeof value !== "object") throw new Error("Unsupported player input.");
   const input = value as Record<string, unknown>;
-  if (!("aim" in input) && !("shoot" in input) && !("run" in input) && "movement" in input) {
+  if (!("aim" in input) && !("shoot" in input) && !("run" in input) && !("kill" in input) && "movement" in input) {
     return {
       movement: readVector(input.movement),
       sequence: readSequence(input.sequence),
@@ -53,6 +53,7 @@ function readPlayerInput(value: unknown): PlayerInputPayload {
     targetPoint: readOptionalPoint(input.targetPoint),
     shoot: input.shoot === true,
     run: input.run === true,
+    kill: input.kill === true,
   };
 }
 

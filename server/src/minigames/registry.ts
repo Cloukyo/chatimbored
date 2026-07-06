@@ -1,6 +1,7 @@
 import { buttonRace } from "./ButtonRace.js";
 import { actNatural } from "./ActNatural.js";
 import { lootAndLeave } from "./LootAndLeave.js";
+import { silentWitness } from "./SilentWitness.js";
 import type { Minigame } from "./Minigame.js";
 
 const minigames = new Map<string, Minigame>();
@@ -21,3 +22,4 @@ export function listMinigames(): Minigame[] {
 registerMinigame(buttonRace);
 registerMinigame(actNatural);
 registerMinigame(lootAndLeave);
+registerMinigame(silentWitness);

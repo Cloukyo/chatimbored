@@ -1,6 +1,7 @@
 import { buttonRace } from "./ButtonRace.js";
 import { actNatural } from "./ActNatural.js";
 import { lootAndLeave } from "./LootAndLeave.js";
+import { luckySeven } from "./LuckySeven.js";
 import { silentWitness } from "./SilentWitness.js";
 import type { Minigame } from "./Minigame.js";
 
@@ -23,3 +24,4 @@ registerMinigame(buttonRace);
 registerMinigame(actNatural);
 registerMinigame(lootAndLeave);
 registerMinigame(silentWitness);
+registerMinigame(luckySeven);

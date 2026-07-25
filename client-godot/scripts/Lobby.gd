@@ -54,6 +54,8 @@ func _build_ui() -> void:
 	minigame_selector.set_item_metadata(2, "loot_and_leave")
 	minigame_selector.add_item("Silent Witness")
 	minigame_selector.set_item_metadata(3, "silent_witness")
+	minigame_selector.add_item("Lucky Seven")
+	minigame_selector.set_item_metadata(4, "lucky_seven")
 	root.add_child(minigame_selector)
 
 	players_box = VBoxContainer.new()
@@ -111,6 +113,8 @@ func _render() -> void:
 			get_tree().change_scene_to_file("res://scenes/LootAndLeave.tscn")
 		elif game_id == "silent_witness":
 			get_tree().change_scene_to_file("res://scenes/SilentWitness.tscn")
+		elif game_id == "lucky_seven":
+			get_tree().change_scene_to_file("res://scenes/LuckySeven.tscn")
 		else:
 			get_tree().change_scene_to_file("res://scenes/GameScreen.tscn")
 

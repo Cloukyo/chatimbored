@@ -86,6 +86,12 @@ func send_loot_and_leave_input(movement: Vector2, sequence: int) -> void:
 		}
 	})
 
+func send_lucky_seven_input(action: String) -> void:
+	_send({
+		"type": "PLAYER_INPUT",
+		"input": {"action": action}
+	})
+
 func return_to_lobby() -> void:
 	_send({"type": "RETURN_TO_LOBBY"})
 

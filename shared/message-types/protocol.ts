@@ -42,6 +42,7 @@ export type GameSnapshot = {
   actNatural?: ActNaturalState;
   lootAndLeave?: LootAndLeaveState;
   silentWitness?: SilentWitnessState;
+  luckySeven?: LuckySevenState;
 };
 
 export type Vector2Payload = {
@@ -154,6 +155,44 @@ export type SilentWitnessInput = {
   kill: boolean;
 };
 
+export type LuckySevenCard = {
+  id: string;
+  kind: "number";
+  value: number;
+};
+
+export type LuckySevenRoundState = "playing" | "stayed" | "busted";
+
+export type LuckySevenPlayerState = {
+  id: string;
+  cards: LuckySevenCard[];
+  roundState: LuckySevenRoundState;
+  roundScore: number;
+  totalScore: number;
+};
+
+export type LuckySevenEvent = {
+  type: "hit" | "stay" | "bust" | "lucky_seven" | "round_start" | "game_over";
+  playerId?: string;
+  card?: LuckySevenCard;
+  message: string;
+};
+
+export type LuckySevenState = {
+  round: number;
+  deck?: LuckySevenCard[];
+  deckCount: number;
+  players: LuckySevenPlayerState[];
+  targetScore: number;
+  bonus: number;
+  status: "playing" | "complete";
+  lastEvent?: LuckySevenEvent;
+};
+
+export type LuckySevenInput = {
+  action: "hit" | "stay";
+};
+
 export type LootAndLeavePlayerState = {
   id: string;
   x: number;
@@ -232,7 +271,7 @@ export type LootAndLeaveInput = {
   sequence?: number;
 };
 
-export type PlayerInputPayload = "PRESS" | ActNaturalInput | LootAndLeaveInput | SilentWitnessInput;
+export type PlayerInputPayload = "PRESS" | ActNaturalInput | LootAndLeaveInput | SilentWitnessInput | LuckySevenInput;
 
 export type ClientMessage =
   | { type: "CREATE_ROOM"; displayName: string }

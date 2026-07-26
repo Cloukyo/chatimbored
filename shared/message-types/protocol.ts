@@ -155,11 +155,21 @@ export type SilentWitnessInput = {
   kill: boolean;
 };
 
-export type LuckySevenCard = {
+export type LuckySevenNumberCard = {
   id: string;
   kind: "number";
   value: number;
 };
+
+export type LuckySevenBonusCard = {
+  id: string;
+  kind: "bonus";
+  effect: "plus_5" | "plus_10" | "lucky_break";
+  label: string;
+  bonusValue: number;
+};
+
+export type LuckySevenCard = LuckySevenNumberCard | LuckySevenBonusCard;
 
 export type LuckySevenRoundState = "playing" | "stayed" | "busted";
 

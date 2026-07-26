@@ -60,13 +60,13 @@ export const luckySeven: Minigame = {
     if (isDuplicateNumber(player.cards, card)) {
       player.roundState = "busted";
       player.roundScore = 0;
-      state.lastEvent = event("bust", `${playerId} busted on ${card.value}.`, playerId, card);
+      state.lastEvent = event("bust", `${playerId} busted on ${cardLabel(card)}.`, playerId, card);
       finishRoundIfNeeded(room);
       return room.game;
     }
 
     player.roundScore = scoreCards(player.cards);
-    state.lastEvent = event("hit", `${playerId} drew ${card.value}.`, playerId, card);
+    state.lastEvent = event("hit", `${playerId} drew ${cardLabel(card)}.`, playerId, card);
 
 	if (uniqueNumberCount(player.cards) >= LUCKY_SEVEN_MAX_UNIQUE_CARDS) {
 		player.roundScore += LUCKY_SEVEN_BONUS;
@@ -156,6 +156,12 @@ function createDeck(roomCode: string, round: number): LuckySevenCard[] {
       cards.push({ id: `r${round}_${value}_${copy}`, kind: "number", value });
     }
   }
+  cards.push(
+    { id: `r${round}_bonus_plus_5_a`, kind: "bonus", effect: "plus_5", label: "+5", bonusValue: 5 },
+    { id: `r${round}_bonus_plus_5_b`, kind: "bonus", effect: "plus_5", label: "+5", bonusValue: 5 },
+    { id: `r${round}_bonus_plus_10`, kind: "bonus", effect: "plus_10", label: "+10", bonusValue: 10 },
+    { id: `r${round}_bonus_lucky_break`, kind: "bonus", effect: "lucky_break", label: "Lucky +7", bonusValue: 7 },
+  );
   return shuffle(cards, seedFrom(roomCode, round));
 }
 
@@ -175,15 +181,16 @@ function seedFrom(roomCode: string, round: number): number {
 }
 
 function isDuplicateNumber(cards: LuckySevenCard[], latest: LuckySevenCard): boolean {
-  return cards.filter((card) => card.value === latest.value).length > 1;
+  if (latest.kind !== "number") return false;
+  return cards.filter((card) => card.kind === "number" && card.value === latest.value).length > 1;
 }
 
 function scoreCards(cards: LuckySevenCard[]): number {
-  return cards.reduce((sum, card) => sum + card.value, 0);
+  return cards.reduce((sum, card) => sum + (card.kind === "number" ? card.value : card.bonusValue), 0);
 }
 
 function uniqueNumberCount(cards: LuckySevenCard[]): number {
-  return new Set(cards.map((card) => card.value)).size;
+  return new Set(cards.filter((card) => card.kind === "number").map((card) => card.value)).size;
 }
 
 function isLuckySevenInput(input: unknown): input is LuckySevenInput {
@@ -192,4 +199,8 @@ function isLuckySevenInput(input: unknown): input is LuckySevenInput {
 
 function event(type: LuckySevenEvent["type"], message: string, playerId?: string, card?: LuckySevenCard): LuckySevenEvent {
   return { type, message, playerId, card };
+}
+
+function cardLabel(card: LuckySevenCard): string {
+  return card.kind === "number" ? String(card.value) : card.label;
 }

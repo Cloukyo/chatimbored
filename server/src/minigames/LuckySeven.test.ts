@@ -36,6 +36,7 @@ test("setup creates a multiplayer press-your-luck card round", () => {
 
   assert.equal(room.game!.minigameId, "lucky_seven");
   assert.equal(room.game!.name, "Lucky Seven");
+  assert.equal(luckySeven.maxPlayers, 8);
   assert.equal(state.players.length, 4);
   assert.equal(state.targetScore, LUCKY_SEVEN_TARGET_SCORE);
 	assert.ok(state.deckCount > 0);
@@ -60,6 +61,43 @@ test("hit deals a visible number card to the player", () => {
   assert.equal(player.roundState, "playing");
   assert.equal(player.roundScore, player.cards[0].value);
   assert.equal(room.game!.luckySeven!.lastEvent?.type, "hit");
+});
+
+test("visible cards and scores are broadcast for every player", () => {
+	const room = setupRoom(8);
+	const state = room.game!.luckySeven!;
+	state.deck = Array.from({ length: 8 }, (_unused, index) => ({ id: `forced_${index + 1}`, kind: "number" as const, value: index + 1 }));
+
+	for (const player of state.players) {
+		luckySeven.handleInput(room, player.id, input("hit"));
+	}
+
+	assert.equal(state.players.length, 8);
+	assert.deepEqual(state.players.map((player) => player.cards.length), [1, 1, 1, 1, 1, 1, 1, 1]);
+	assert.deepEqual(state.players.map((player) => player.roundScore), [1, 2, 3, 4, 5, 6, 7, 8]);
+});
+
+test("bonus cards add their effect value without creating duplicate number busts", () => {
+	const room = setupRoom();
+	const state = room.game!.luckySeven!;
+	const player = state.players[0];
+	state.deck = [
+		{ id: "forced_5_a", kind: "number", value: 5 },
+		{ id: "forced_plus_5", kind: "bonus", effect: "plus_5", label: "+5", bonusValue: 5 },
+		{ id: "forced_5_b", kind: "number", value: 5 },
+	];
+
+	luckySeven.handleInput(room, player.id, input("hit"));
+	luckySeven.handleInput(room, player.id, input("hit"));
+
+	assert.equal(player.roundState, "playing");
+	assert.equal(player.roundScore, 10);
+	assert.equal(state.lastEvent?.card?.kind, "bonus");
+
+	luckySeven.handleInput(room, player.id, input("hit"));
+
+	assert.equal(player.roundState, "busted");
+	assert.equal(player.roundScore, 0);
 });
 
 test("duplicate number card busts the player for the round", () => {

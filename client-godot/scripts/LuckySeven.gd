@@ -9,6 +9,7 @@ const CARD_INK := Color(0.11, 0.10, 0.08)
 const ACCENT := Color(0.98, 0.78, 0.28)
 const DANGER := Color(0.92, 0.28, 0.18)
 const MUTED := Color(0.68, 0.72, 0.68)
+const BONUS_FACE := Color(0.98, 0.78, 0.28)
 const CARD_SIZE := Vector2(78, 108)
 
 var game: Dictionary = {}
@@ -150,9 +151,52 @@ func _draw() -> void:
 	draw_rect(table_rect, TABLE, true)
 	draw_rect(table_rect, TABLE_EDGE, false, 3.0)
 
-	_draw_score_rows(state)
-	_draw_local_hand(state)
+	_draw_table_players(state, table_rect)
 	_draw_deck(state)
+
+func _draw_table_players(state: Dictionary, table_rect: Rect2) -> void:
+	var players: Array = state.get("players", [])
+	for index in range(players.size()):
+		var player: Dictionary = players[index]
+		var angle: float = -PI * 0.5 + TAU * float(index) / max(1.0, float(players.size()))
+		var radius := Vector2(table_rect.size.x * 0.36, table_rect.size.y * 0.34)
+		var center := table_rect.position + table_rect.size * 0.5 + Vector2(cos(angle) * radius.x, sin(angle) * radius.y)
+		var is_local := str(player.get("id", "")) == NetworkManager.player_id
+		_draw_player_seat(player, center, is_local)
+
+func _draw_player_seat(player: Dictionary, center: Vector2, is_local: bool) -> void:
+	var cards: Array = player.get("cards", [])
+	var card_size := CARD_SIZE if is_local else CARD_SIZE * 0.58
+	var overlap: float = 52.0 if is_local else 27.0
+	var max_cards := min(cards.size(), 9)
+	var total_width: float = max(card_size.x, float(max_cards - 1) * overlap + card_size.x)
+	var origin := center - Vector2(total_width * 0.5, card_size.y * 0.5)
+	var state_text := str(player.get("roundState", "playing"))
+	var panel_color := Color(0.04, 0.07, 0.06, 0.50)
+	if is_local:
+		panel_color = Color(0.12, 0.20, 0.18, 0.72)
+	var panel_rect := Rect2(origin + Vector2(-12, -48), Vector2(total_width + 24, card_size.y + 80))
+	draw_rect(panel_rect, panel_color, true)
+	draw_rect(panel_rect, ACCENT if is_local else Color(0.23, 0.31, 0.27), false, 2.0)
+
+	for index in range(max_cards):
+		_draw_card(Rect2(origin + Vector2(index * overlap, 0), card_size), cards[index], true)
+
+	if cards.is_empty():
+		draw_string(get_theme_default_font(), origin + Vector2(0, card_size.y * 0.48), "Waiting", HORIZONTAL_ALIGNMENT_CENTER, total_width, 15, MUTED)
+
+	var id := str(player.get("id", ""))
+	var name := _player_name(id)
+	var marker := "You" if is_local else ""
+	var name_color := Color.WHITE
+	if state_text == "busted":
+		name_color = DANGER
+	elif state_text == "stayed":
+		name_color = MUTED
+	draw_string(get_theme_default_font(), panel_rect.position + Vector2(8, 19), "%s %s" % [name, marker], HORIZONTAL_ALIGNMENT_LEFT, panel_rect.size.x - 16, 15, name_color)
+	var score_text := "Round %s   Banked %s" % [player.get("roundScore", 0), player.get("totalScore", 0)]
+	draw_string(get_theme_default_font(), panel_rect.position + Vector2(8, panel_rect.size.y - 20), score_text, HORIZONTAL_ALIGNMENT_LEFT, panel_rect.size.x - 16, 14, Color.WHITE)
+	draw_string(get_theme_default_font(), panel_rect.position + Vector2(panel_rect.size.x - 80, 19), state_text, HORIZONTAL_ALIGNMENT_RIGHT, 72, 14, name_color)
 
 func _draw_score_rows(state: Dictionary) -> void:
 	var players: Array = state.get("players", [])
@@ -190,20 +234,25 @@ func _draw_local_hand(state: Dictionary) -> void:
 	draw_string(get_theme_default_font(), Vector2(36, size.y - 112), label, HORIZONTAL_ALIGNMENT_LEFT, size.x - 72, 22, Color.WHITE)
 
 func _draw_deck(state: Dictionary) -> void:
-	var rect := Rect2(Vector2(62, 226), CARD_SIZE)
+	var rect := Rect2(Vector2(62, 226), CARD_SIZE * 0.72)
 	_draw_card(rect, {}, false)
 	draw_string(get_theme_default_font(), rect.position + Vector2(-10, CARD_SIZE.y + 24), "Deck: %s" % state.get("deckCount", 0), HORIZONTAL_ALIGNMENT_CENTER, CARD_SIZE.x + 20, 16, Color.WHITE)
 
 func _draw_card(rect: Rect2, card: Dictionary, face_up: bool) -> void:
-	draw_rect(rect, CARD_FACE if face_up else CARD_BACK, true)
+	var is_bonus := str(card.get("kind", "number")) == "bonus"
+	draw_rect(rect, BONUS_FACE if face_up and is_bonus else CARD_FACE if face_up else CARD_BACK, true)
 	draw_rect(rect, Color(0.05, 0.05, 0.05), false, 2.0)
 	if not face_up:
 		draw_rect(Rect2(rect.position + Vector2(10, 10), rect.size - Vector2(20, 20)), Color(0.28, 0.36, 0.52), false, 2.0)
 		draw_string(get_theme_default_font(), rect.position + Vector2(0, 62), "?", HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 32, Color.WHITE)
 		return
-	var value := str(card.get("value", "?"))
-	draw_string(get_theme_default_font(), rect.position + Vector2(8, 26), value, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 16, 22, CARD_INK)
-	draw_string(get_theme_default_font(), rect.position + Vector2(0, 70), value, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 34, CARD_INK)
+	var value := str(card.get("label", card.get("value", "?")))
+	var font_size: int = 18 if rect.size.x < 60.0 else 22
+	var big_size: int = 23 if rect.size.x < 60.0 else 34
+	draw_string(get_theme_default_font(), rect.position + Vector2(6, rect.size.y * 0.25), value, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 12, font_size, CARD_INK)
+	draw_string(get_theme_default_font(), rect.position + Vector2(0, rect.size.y * 0.66), value, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, big_size, CARD_INK)
+	if is_bonus:
+		draw_string(get_theme_default_font(), rect.position + Vector2(0, rect.size.y - 10), "BONUS", HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 10, CARD_INK)
 
 func _send_action(action: String) -> void:
 	if local_state.is_empty() or str(local_state.get("roundState", "")) != "playing":
@@ -215,7 +264,7 @@ func _render_ui() -> void:
 	title_label.text = "Lucky Seven"
 	controls_label.text = "Space / Enter / A: Hit    S / Esc / B: Stay"
 	var round_state := str(local_state.get("roundState", "playing"))
-	status_label.text = "Shot-call: draw without repeating a number, or stay and bank."
+	status_label.text = "Draw without repeating a number. Bonus cards add points and do not bust."
 	if round_state == "busted":
 		status_label.text = "Busted for this round."
 	elif round_state == "stayed":

@@ -161,17 +161,24 @@ export type LuckySevenNumberCard = {
   value: number;
 };
 
-export type LuckySevenBonusCard = {
+export type LuckySevenModifierCard = {
   id: string;
-  kind: "bonus";
-  effect: "plus_5" | "plus_10" | "lucky_break";
+  kind: "modifier";
+  effect: "plus" | "x2";
   label: string;
-  bonusValue: number;
+  value?: number;
 };
 
-export type LuckySevenCard = LuckySevenNumberCard | LuckySevenBonusCard;
+export type LuckySevenActionCard = {
+  id: string;
+  kind: "action";
+  effect: "freeze" | "flip_three" | "second_chance";
+  label: string;
+};
 
-export type LuckySevenRoundState = "playing" | "stayed" | "busted";
+export type LuckySevenCard = LuckySevenNumberCard | LuckySevenModifierCard | LuckySevenActionCard;
+
+export type LuckySevenRoundState = "playing" | "stayed" | "frozen" | "busted";
 
 export type LuckySevenPlayerState = {
   id: string;
@@ -179,28 +186,62 @@ export type LuckySevenPlayerState = {
   roundState: LuckySevenRoundState;
   roundScore: number;
   totalScore: number;
+  hasSecondChance: boolean;
 };
 
 export type LuckySevenEvent = {
-  type: "hit" | "stay" | "bust" | "lucky_seven" | "round_start" | "game_over";
+  sequence: number;
+  type:
+    | "round_start"
+    | "requested_hit"
+    | "requested_stay"
+    | "card_drawn"
+    | "stay"
+    | "bust"
+    | "second_chance"
+    | "freeze"
+    | "flip_three"
+    | "lucky_seven"
+    | "round_summary"
+    | "game_over";
   playerId?: string;
   card?: LuckySevenCard;
   message: string;
+};
+
+export type LuckySevenRoundSummary = {
+  id: string;
+  roundPoints: number;
+  totalScore: number;
+  result: LuckySevenRoundState;
+};
+
+export type LuckySevenFinalResult = {
+  id: string;
+  rank: number;
+  totalScore: number;
 };
 
 export type LuckySevenState = {
   round: number;
   deck?: LuckySevenCard[];
   deckCount: number;
+  discardPile: LuckySevenCard[];
   players: LuckySevenPlayerState[];
+  dealerId: string;
+  activePlayerId?: string;
+  pendingDecision?: "hit" | "stay";
+  turnState: "awaiting_player" | "awaiting_dealer" | "round_summary" | "complete";
   targetScore: number;
   bonus: number;
   status: "playing" | "complete";
+  roundSummary?: LuckySevenRoundSummary[];
+  finalResults?: LuckySevenFinalResult[];
   lastEvent?: LuckySevenEvent;
 };
 
 export type LuckySevenInput = {
-  action: "hit" | "stay";
+  action: "request_hit" | "request_stay" | "dealer_deal" | "dealer_confirm_stay" | "continue";
 };
 
 export type LootAndLeavePlayerState = {

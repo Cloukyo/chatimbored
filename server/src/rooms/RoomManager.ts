@@ -31,7 +31,10 @@ export class RoomManager {
   leave(playerId: string): Room | undefined {
     const room = this.getRoomForPlayer(playerId);
     if (!room) return undefined;
+    const minigame = room.phase === "in_game" ? getMinigame(room.selectedMinigameId) : undefined;
     room.removePlayer(playerId);
+    minigame?.onPlayerLeft?.(room, playerId);
+    if (room.game?.winnerId && room.phase === "in_game" && minigame) room.finish(minigame);
     this.playerRooms.delete(playerId);
     if (room.players.length === 0) this.rooms.delete(room.code);
     return room;
@@ -69,6 +72,7 @@ export class RoomManager {
       const minigame = getMinigame(room.selectedMinigameId);
       if (!minigame || room.phase !== "in_game") throw new Error("No minigame is running.");
       minigame.handleInput(room, playerId, message.input);
+      if (room.game?.winnerId) onGameFinished(room);
       return room;
     }
 

@@ -41,7 +41,13 @@ export function parseClientMessage(raw: unknown): ClientMessage {
 function readPlayerInput(value: unknown): PlayerInputPayload {
   if (!value || typeof value !== "object") throw new Error("Unsupported player input.");
   const input = value as Record<string, unknown>;
-  if (input.action === "hit" || input.action === "stay") {
+  if (
+    input.action === "request_hit"
+    || input.action === "request_stay"
+    || input.action === "dealer_deal"
+    || input.action === "dealer_confirm_stay"
+    || input.action === "continue"
+  ) {
     return { action: input.action };
   }
   if (!("aim" in input) && !("shoot" in input) && !("run" in input) && !("kill" in input) && "movement" in input) {

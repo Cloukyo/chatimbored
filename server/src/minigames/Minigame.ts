@@ -9,6 +9,7 @@ export type Minigame = {
   tickMs?: number;
   setup(room: Room): GameSnapshot;
   handleInput(room: Room, playerId: string | undefined, input: unknown): GameSnapshot;
+  onPlayerLeft?(room: Room, playerId: string): GameSnapshot;
   update?(room: Room, deltaMs: number): GameSnapshot;
   finish(room: Room): GameSnapshot;
 };

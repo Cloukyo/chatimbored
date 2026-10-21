@@ -213,15 +213,9 @@ Do not upload `client-godot/builds/web/` to the Node server host. It belongs on 
 
 ## Browser Client (crowd games)
 
-The crowd games run in `client-web/`, a separate static site. Create a second Vercel project from this repo with:
+The crowd games run in `client-web/`. `npm run vercel-build` builds it into `client-godot/builds/web/play/`, so the existing Vercel site serves it at `/play/` next to the Godot build. No extra Vercel project is needed.
 
-- Framework Preset: `Vite` (or `Other`)
-- Root Directory: repo root
-- Install Command: `npm install`
-- Build Command: `npm run build:web`
-- Output Directory: `client-web/dist`
-
-It connects to `wss://chatimbored-production.up.railway.app` by default. Override it with the `VITE_SERVER_URL` environment variable at build time, or `?server=wss://...` in the page URL. Invite links look like `https://your-site.vercel.app/?room=ABCDE`.
+It connects to `wss://chatimbored-production.up.railway.app` by default. Override it with the `VITE_SERVER_URL` environment variable at build time, or `?server=wss://...` in the page URL. Invite links look like `https://your-site.vercel.app/play/?room=ABCDE`.
 
 ## Vercel Static Client Settings
 

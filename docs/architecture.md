@@ -4,7 +4,7 @@
 
 ## Browser client (crowd games)
 
-`client-web/` is a TypeScript + Vite client with its own landing page and lobby. It plays the crowd games (`crowd_act_natural`, `crowd_silent_witness`) and draws with Canvas 2D.
+`client-web/` is a TypeScript + Vite client with its own landing page and lobby. It plays the crowd games (`crowd_act_natural`, `crowd_silent_witness`, `crowd_lantern_festival`, `crowd_bell_ringers`, `crowd_heist_hour`, `crowd_marked`) and draws with Canvas 2D.
 
 - `src/net.ts`: WebSocket connection and server URL lookup (`?server=`, then local storage, then `VITE_SERVER_URL`, then localhost or the Render URL).
 - `src/main.ts`: landing, lobby and results screens.
@@ -12,6 +12,8 @@
 - `src/crowd/draw.ts`: plaza, figures and effects. Every figure is drawn the same way.
 
 The server runs crowd games in `server/src/crowd/`. `CrowdMatch` owns the entities, input queues and events; `modes.ts` holds each mode's rules. Each player gets their own view: an anonymous, id-sorted entity list (shuffled ids each round), their own entity id, role and shots. Roles and player ids are only revealed in the round result.
+
+Modes can also add fixed map props (lanterns, bells, vaults). Their public state is in every view, and the props a player has personally used are in `mine`. A `flare` event shows that a prop was used, but not who used it. Lookouts in Bell Ringers have a hidden entity that never appears in the crowd, and their shots land on the clicked point. Marked keeps its hunter→mark loop in `modes.ts`, and each hunter's view carries only their own mark's name and a fuzzy position hint.
 
 ## Godot client
 

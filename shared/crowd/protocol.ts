@@ -3,9 +3,10 @@
 
 export type CrowdVector = { x: number; y: number };
 
-export type CrowdModeId = "act_natural" | "silent_witness";
+export type CrowdModeId = "act_natural" | "silent_witness" | "lantern_festival" | "bell_ringers" | "heist_hour" | "marked";
 
-export type CrowdRole = "runner" | "killer" | "hunter";
+// "lookout" watches from above and has no figure in the crowd.
+export type CrowdRole = "runner" | "killer" | "hunter" | "ringer" | "lookout";
 
 export type CrowdInput = {
   kind: "crowd";
@@ -26,15 +27,23 @@ export const CROWD_STATE = {
   RUN: 2,
   DEAD: 3,
   SICK: 4,
+  STUNNED: 5,
 } as const;
 
 export type CrowdEntityState = (typeof CROWD_STATE)[keyof typeof CROWD_STATE];
+
+// Fixed objects on the map. `on` is public (a rung bell, a vault on cooldown); per-player progress goes in `mine`.
+export type CrowdPropKind = "lantern" | "bell" | "vault";
+export type CrowdProp = { id: number; kind: CrowdPropKind; x: number; y: number; on: boolean };
 
 export type CrowdEvent =
   | { id: number; type: "shot"; from: CrowdVector; to: CrowdVector }
   | { id: number; type: "down"; entity: number }
   | { id: number; type: "escaped"; entity: number }
-  | { id: number; type: "message"; text: string };
+  | { id: number; type: "message"; text: string }
+  // A prop was used by someone. Everyone sees the flash, but not who did it.
+  | { id: number; type: "flare"; prop: number }
+  | { id: number; type: "strike"; at: CrowdVector };
 
 export type CrowdReveal = {
   entity: number;
@@ -45,8 +54,10 @@ export type CrowdReveal = {
 
 export type CrowdResult = {
   // "player" means winnerPlayerId escaped or survived; the others are team results.
-  winner: "player" | "killer" | "hunters" | "none";
+  winner: "player" | "killer" | "hunters" | "ringers" | "lookouts" | "none";
   winnerPlayerId?: string;
+  // Set for team wins: every player with this role scores.
+  winnerRole?: CrowdRole;
   reveal: CrowdReveal[];
 };
 
@@ -54,7 +65,7 @@ export type CrowdView = {
   mode: CrowdModeId;
   arena: { width: number; height: number; exitX?: number };
   tick: number;
-  // Your own entity id and the last input seq the server applied for you.
+  // Your own entity id (0 for a lookout, who has none) and the last input seq the server applied for you.
   you: number;
   ack: number;
   role: CrowdRole;
@@ -66,6 +77,17 @@ export type CrowdView = {
   e: number[];
   // Recent public events; clients de-duplicate by id.
   events: CrowdEvent[];
-  hud: { kills?: number; killTarget?: number };
+  props: CrowdProp[];
+  // Props this player has personally used, e.g. lanterns they lit.
+  mine: number[];
+  hud: {
+    kills?: number;
+    killTarget?: number;
+    progress?: number;
+    goal?: number;
+    // Marked: your secret target's name and a rough, periodically refreshed idea of where they are.
+    markName?: string;
+    hint?: CrowdVector;
+  };
   result?: CrowdResult;
 };

@@ -3,10 +3,27 @@ import test from "node:test";
 import { CROWD_RUN_SPEED, CROWD_TICK_SECONDS, CROWD_WALK_SPEED, stepPosition } from "../../../shared/crowd/movement.js";
 import type { CrowdInput, CrowdView } from "../../../shared/crowd/protocol.js";
 import type { CrowdMatch } from "../crowd/CrowdMatch.js";
-import { ACT_NATURAL_EXIT_X, SILENT_WITNESS_KILL_TARGET } from "../crowd/modes.js";
+import {
+  ACT_NATURAL_EXIT_X,
+  HEIST_GOAL,
+  LANTERN_GOAL,
+  LOOKOUT_ARROWS,
+  MARKED_GOAL,
+  SILENT_WITNESS_KILL_TARGET,
+  markedState,
+} from "../crowd/modes.js";
 import { seededRandom } from "../crowd/random.js";
 import { Room } from "../rooms/Room.js";
-import { crowdActNatural, crowdMatchFor, crowdSilentWitness, setCrowdRandomForTests } from "./CrowdGames.js";
+import {
+  crowdActNatural,
+  crowdBellRingers,
+  crowdHeistHour,
+  crowdLanternFestival,
+  crowdMarked,
+  crowdMatchFor,
+  crowdSilentWitness,
+  setCrowdRandomForTests,
+} from "./CrowdGames.js";
 import type { Minigame } from "./Minigame.js";
 
 let seed = 1;
@@ -215,4 +232,160 @@ test("a player who leaves keeps wandering with the crowd", () => {
   const entity = entityOf(match, "p3");
   assert.ok(entity.brain);
   assert.equal(room.game!.winnerId, undefined);
+});
+
+// Parks every NPC in a far corner so they can't get in the way.
+function clearCrowd(match: CrowdMatch, x = 30, y = 690): void {
+  match.entities.filter((entity) => entity.brain).forEach((npc) => {
+    npc.x = x;
+    npc.y = y;
+    npc.direction = { x: 0, y: 0 };
+    npc.brain!.timerMs = 1e9;
+  });
+}
+
+function standAt(match: CrowdMatch, playerId: string, spot: { x: number; y: number }): void {
+  const entity = entityOf(match, playerId);
+  entity.x = spot.x;
+  entity.y = spot.y + 10;
+  match.slots.get(playerId)!.actCooldownMs = 0;
+}
+
+test("Lantern Festival: lighting every lantern wins, and each one flares for everyone", () => {
+  const { room, match } = start(crowdLanternFestival, 3);
+  clearCrowd(match);
+  assert.equal(match.props.length, LANTERN_GOAL);
+  for (const lantern of match.props) {
+    standAt(match, "p1", lantern);
+    send(crowdLanternFestival, room, "p1", { act: true });
+    assert.ok(view(crowdLanternFestival, room, "p2").events.some((event) => event.type === "flare" && event.prop === lantern.id));
+  }
+  assert.equal(view(crowdLanternFestival, room, "p1").hud.progress, LANTERN_GOAL);
+  assert.equal(view(crowdLanternFestival, room, "p2").mine.length, 0);
+  assert.equal(room.game!.winnerId, "p1");
+});
+
+test("Lantern Festival: a strike takes down whoever is in reach, and the last one standing wins", () => {
+  const { room, match } = start(crowdLanternFestival, 2);
+  clearCrowd(match);
+  standAt(match, "p1", { x: 640, y: 300 });
+  standAt(match, "p2", { x: 660, y: 300 });
+  send(crowdLanternFestival, room, "p1", { act: true });
+  assert.equal(entityOf(match, "p2").dead, true);
+  assert.equal(room.game!.winnerId, "p1");
+});
+
+test("Bell Ringers: Lookouts aren't in the crowd and shoot where they click", () => {
+  const { room, match } = start(crowdBellRingers, 3);
+  const ringer = [...match.slots.values()].find((slot) => slot.role === "ringer")!;
+  const lookout = [...match.slots.values()].find((slot) => slot.role === "lookout")!;
+  const lookoutView = view(crowdBellRingers, room, lookout.playerId);
+  assert.equal(lookoutView.you, 0);
+  assert.equal(lookoutView.shots, LOOKOUT_ARROWS);
+  assert.equal(lookoutView.e.length, (match.entities.length - 2) * 5);
+
+  clearCrowd(match);
+  ringer.entity.x = 600;
+  ringer.entity.y = 400;
+  send(crowdBellRingers, room, lookout.playerId, { shoot: { x: 603, y: 382 } });
+  assert.equal(ringer.entity.dead, true);
+  assert.equal(room.game!.winnerId, "lookouts");
+  crowdBellRingers.finish(room);
+  assert.equal(room.players.find((player) => player.id === lookout.playerId)!.score, 1);
+  assert.equal(room.players.find((player) => player.id === ringer.playerId)!.score, 0);
+});
+
+test("Bell Ringers: ringing every bell wins it for the Ringers", () => {
+  const { room, match } = start(crowdBellRingers, 4);
+  clearCrowd(match);
+  const ringers = [...match.slots.values()].filter((slot) => slot.role === "ringer");
+  assert.equal(ringers.length, 2);
+  match.props.forEach((bell, index) => {
+    const ringer = ringers[index % 2];
+    standAt(match, ringer.playerId, bell);
+    send(crowdBellRingers, room, ringer.playerId, { act: true });
+    assert.equal(bell.on, true);
+  });
+  assert.equal(room.game!.winnerId, "ringers");
+});
+
+test("Bell Ringers: Lookouts out of arrows hand the round to the Ringers", () => {
+  const { room, match } = start(crowdBellRingers, 2);
+  clearCrowd(match);
+  const lookout = [...match.slots.values()].find((slot) => slot.role === "lookout")!;
+  for (let arrow = 0; arrow < LOOKOUT_ARROWS; arrow += 1) send(crowdBellRingers, room, lookout.playerId, { shoot: { x: 900, y: 100 } });
+  assert.equal(room.game!.winnerId, "ringers");
+});
+
+test("Heist Hour: three different vaults win, and a cracked vault stays alarmed for a while", () => {
+  const { room, match } = start(crowdHeistHour, 3);
+  clearCrowd(match);
+  const [first, second, third] = match.props;
+  standAt(match, "p1", first);
+  send(crowdHeistHour, room, "p1", { act: true });
+  assert.equal(first.on, true);
+
+  standAt(match, "p2", first);
+  send(crowdHeistHour, room, "p2", { act: true });
+  assert.equal(view(crowdHeistHour, room, "p2").hud.progress, 0);
+
+  for (const vault of [second, third]) {
+    standAt(match, "p1", vault);
+    send(crowdHeistHour, room, "p1", { act: true });
+  }
+  assert.equal(view(crowdHeistHour, room, "p1").hud.progress, HEIST_GOAL);
+  assert.equal(room.game!.winnerId, "p1");
+});
+
+test("Heist Hour: alarms reset after a few seconds", () => {
+  const { room, match } = start(crowdHeistHour, 2);
+  clearCrowd(match);
+  const vault = match.props[0];
+  standAt(match, "p1", vault);
+  send(crowdHeistHour, room, "p1", { act: true });
+  for (let tick = 0; tick < 120; tick += 1) crowdHeistHour.update!(room, 50);
+  assert.equal(vault.on, false);
+});
+
+test("Marked: striking your mark scores and hands you their mark", () => {
+  const { room, match } = start(crowdMarked, 4);
+  clearCrowd(match);
+  const state = markedState(match);
+  const mark = state.targets.get("p1")!;
+  const next = state.targets.get(mark)!;
+  standAt(match, "p1", { x: 640, y: 300 });
+  standAt(match, mark, { x: 660, y: 300 });
+  send(crowdMarked, room, "p1", { act: true });
+  assert.equal(entityOf(match, mark).dead, true);
+  const mine = view(crowdMarked, room, "p1");
+  assert.equal(mine.hud.progress, 1);
+  assert.equal(mine.hud.markName, next);
+  assert.equal(entityOf(match, "p1").stunMs, 0);
+});
+
+test("Marked: striking the wrong person leaves you stunned in plain view", () => {
+  const { room, match } = start(crowdMarked, 3);
+  clearCrowd(match);
+  const npc = match.entities.find((entity) => entity.brain)!;
+  standAt(match, "p1", { x: 640, y: 300 });
+  npc.x = 660;
+  npc.y = 310;
+  send(crowdMarked, room, "p1", { act: true });
+  assert.equal(npc.dead, true);
+  assert.ok(entityOf(match, "p1").stunMs > 0);
+  const packed = view(crowdMarked, room, "p2").e;
+  const index = packed.findIndex((value, at) => at % 5 === 0 && value === entityOf(match, "p1").id);
+  assert.equal(packed[index + 4], 5);
+});
+
+test("Marked: everyone gets a rough hint of where their mark is", () => {
+  const { room, match } = start(crowdMarked, 3);
+  crowdMarked.update!(room, 50);
+  for (const playerId of ["p1", "p2", "p3"]) {
+    const mine = view(crowdMarked, room, playerId);
+    const target = entityOf(match, mine.hud.markName!);
+    assert.ok(mine.hud.hint);
+    assert.ok(Math.abs(mine.hud.hint!.x - target.x) <= 75);
+  }
+  assert.equal(MARKED_GOAL, 3);
 });

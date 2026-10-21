@@ -2,7 +2,10 @@ import { buttonRace } from "./ButtonRace.js";
 import {
   crowdActNatural,
   crowdBellRingers,
+  crowdClosingTime,
+  crowdFreezeFrame,
   crowdHeistHour,
+  crowdHotParcel,
   crowdLanternFestival,
   crowdMarked,
   crowdSilentWitness,
@@ -39,3 +42,6 @@ registerMinigame(crowdLanternFestival);
 registerMinigame(crowdBellRingers);
 registerMinigame(crowdHeistHour);
 registerMinigame(crowdMarked);
+registerMinigame(crowdFreezeFrame);
+registerMinigame(crowdHotParcel);
+registerMinigame(crowdClosingTime);

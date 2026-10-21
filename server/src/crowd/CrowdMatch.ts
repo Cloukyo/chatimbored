@@ -9,6 +9,7 @@ import {
   type CrowdRole,
   type CrowdVector,
   type CrowdView,
+  type CrowdZone,
 } from "../../../shared/crowd/protocol.js";
 import { CROWD_TICK_MS, type CrowdArena, facingOf, snapDirection, stepPosition } from "../../../shared/crowd/movement.js";
 import { type Random, shuffle } from "./random.js";
@@ -67,7 +68,8 @@ export type CrowdRules = {
   canAct?(match: CrowdMatch, slot: CrowdSlot): boolean;
   spawnPoint(random: Random, arena: CrowdArena): CrowdVector;
   // Picks the next thing an NPC does: a direction to walk, or stand still for a while.
-  npcPlan(entity: CrowdEntity, random: Random, arena: CrowdArena): { direction: CrowdVector; durationMs: number };
+  npcPlan(entity: CrowdEntity, random: Random, arena: CrowdArena, match: CrowdMatch): { direction: CrowdVector; durationMs: number };
+  zone?(match: CrowdMatch): CrowdZone | undefined;
   onAct?(match: CrowdMatch, slot: CrowdSlot): void;
   onShotHit(match: CrowdMatch, shooter: CrowdSlot, target: CrowdEntity): void;
   onEntityDied?(match: CrowdMatch, entity: CrowdEntity, cause: CrowdDeathCause): void;
@@ -208,7 +210,7 @@ export class CrowdMatch {
       if (!entity.brain) continue;
       entity.brain.timerMs -= CROWD_TICK_MS;
       if (entity.brain.timerMs <= 0) {
-        const plan = this.rules.npcPlan(entity, this.random, this.arena);
+        const plan = this.rules.npcPlan(entity, this.random, this.arena, this);
         entity.direction = plan.direction;
         entity.brain.timerMs = plan.durationMs;
       }
@@ -317,6 +319,7 @@ export class CrowdMatch {
       e: this.packEntities(),
       events: this.events.filter((stored) => stored.tick >= this.tick - EVENT_WINDOW_TICKS).map((stored) => stored.event),
       props: this.props,
+      zone: this.rules.zone?.(this),
       mine: [...slot.mine],
       hud: this.rules.hud?.(this, slot) ?? {},
       result: this.result ? { ...this.result, reveal: this.reveal() } : undefined,

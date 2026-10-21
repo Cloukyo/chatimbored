@@ -1,4 +1,4 @@
-import type { CrowdResult, CrowdRole, CrowdVector } from "../../../shared/crowd/protocol.js";
+import type { CrowdResult, CrowdRole, CrowdVector, CrowdZone } from "../../../shared/crowd/protocol.js";
 import { CROWD_TICK_MS, CROWD_WALK_SPEED, type CrowdArena, snapDirection } from "../../../shared/crowd/movement.js";
 import type { CrowdEntity, CrowdMatch, CrowdRules, CrowdSlot } from "./CrowdMatch.js";
 import { type Random, pickWeighted, shuffle } from "./random.js";
@@ -373,6 +373,199 @@ function dropFromHunt(match: CrowdMatch, playerId: string): void {
     else state.targets.delete(hunter);
     state.hints.delete(hunter);
   }
+}
+
+// Freeze Frame: race to the exit as in Act Natural, but every so often the whole crowd stops dead
+// for a couple of seconds. Nothing announces it: anyone still walking stands out. One shot each.
+export const FREEZE_GAP_MS: [number, number] = [5000, 9000];
+export const FREEZE_LENGTH_MS: [number, number] = [1600, 2600];
+// NPCs restart a little out of step, so the thaw isn't a tell either.
+const THAW_SPREAD_MS = 500;
+type FreezeState = { untilFreezeMs: number; frozenMs: number };
+const freezeStates = new WeakMap<CrowdMatch, FreezeState>();
+
+export const freezeFrameRules: CrowdRules = {
+  ...actNaturalRules,
+  mode: "freeze_frame",
+  npcPlan(entity, random, arena, match) {
+    const frozenMs = freezeState(match).frozenMs;
+    if (frozenMs > 0) return { direction: STILL, durationMs: frozenMs };
+    return actNaturalRules.npcPlan(entity, random, arena, match);
+  },
+  onTick(match) {
+    const state = freezeState(match);
+    if (state.frozenMs > 0) {
+      state.frozenMs = Math.max(0, state.frozenMs - CROWD_TICK_MS);
+      if (state.frozenMs === 0) state.untilFreezeMs = between(match.random, ...FREEZE_GAP_MS);
+    } else {
+      state.untilFreezeMs -= CROWD_TICK_MS;
+      if (state.untilFreezeMs <= 0) freezeCrowd(match, state);
+    }
+    actNaturalRules.onTick(match);
+  },
+};
+
+export function freezeState(match: CrowdMatch): FreezeState {
+  let state = freezeStates.get(match);
+  if (!state) freezeStates.set(match, (state = { untilFreezeMs: between(match.random, ...FREEZE_GAP_MS), frozenMs: 0 }));
+  return state;
+}
+
+function freezeCrowd(match: CrowdMatch, state: FreezeState): void {
+  state.frozenMs = between(match.random, ...FREEZE_LENGTH_MS);
+  for (const entity of match.entities) {
+    if (!entity.brain || entity.dead) continue;
+    entity.direction = STILL;
+    entity.running = false;
+    entity.brain.timerMs = state.frozenMs + Math.round(match.random() * THAW_SPREAD_MS);
+  }
+}
+
+// Hot Parcel: one player secretly holds a ticking parcel and only they know it. Bump into another
+// player (E) to hand it over, but bump an NPC and you've just made a scene for nothing.
+// When the fuse runs out, the holder is out and a new parcel starts. Last one standing wins.
+export const PARCEL_FUSE_MS: [number, number] = [14000, 22000];
+export const PARCEL_REACH = 30;
+export const PARCEL_BUMP_COOLDOWN_MS = 700;
+// You can't hand it straight back to whoever just gave it to you.
+export const PARCEL_NO_RETURN_MS = 3000;
+type ParcelState = { holder?: string; fuseMs: number; from?: string; noReturnMs: number };
+const parcelStates = new WeakMap<CrowdMatch, ParcelState>();
+
+export const hotParcelRules: CrowdRules = {
+  mode: "hot_parcel",
+  arena: PLAZA,
+  npcCount: 44,
+  canRun: false,
+  assignRoles: everyoneRunner,
+  shotsFor: () => 0,
+  spawnPoint: anywhere,
+  npcPlan: (entity, random, arena) => wander(entity, random, arena),
+  canAct: (match, slot) => parcelState(match).holder === slot.playerId,
+  onAct(match, slot) {
+    const state = parcelState(match);
+    if (state.holder !== slot.playerId) return;
+    const target = match.nearestEntity(slot.entity, PARCEL_REACH);
+    if (!target) return;
+    match.emit({ type: "bump", at: { x: target.x, y: target.y } });
+    slot.actCooldownMs = PARCEL_BUMP_COOLDOWN_MS;
+    const receiver = match.slotForEntity(target);
+    if (!receiver || !receiver.connected) return;
+    if (receiver.playerId === state.from && state.noReturnMs > 0) return;
+    state.from = slot.playerId;
+    state.holder = receiver.playerId;
+    state.noReturnMs = PARCEL_NO_RETURN_MS;
+  },
+  onShotHit: () => undefined,
+  onPlayerLeft(match, slot) {
+    if (parcelState(match).holder === slot.playerId) newParcel(match);
+  },
+  onTick(match) {
+    const state = parcelState(match);
+    state.noReturnMs = Math.max(0, state.noReturnMs - CROWD_TICK_MS);
+    state.fuseMs -= CROWD_TICK_MS;
+    if (state.fuseMs <= 0 && state.holder) {
+      const entity = match.slots.get(state.holder)!.entity;
+      match.emit({ type: "strike", at: { x: entity.x, y: entity.y } });
+      match.kill(entity, "strike");
+      lastOneStanding(match);
+      if (!match.result) newParcel(match);
+      return;
+    }
+    lastOneStanding(match);
+  },
+  onTimeout: (match) => mostProgress(match, () => 1),
+  hud(match, slot) {
+    const state = parcelState(match);
+    if (state.holder !== slot.playerId) return { holding: false };
+    return { holding: true, fuseSeconds: Math.max(0, Math.ceil(state.fuseMs / 1000)) };
+  },
+};
+
+export function parcelState(match: CrowdMatch): ParcelState {
+  let state = parcelStates.get(match);
+  if (!state) {
+    parcelStates.set(match, (state = { fuseMs: 0, noReturnMs: 0 }));
+    newParcel(match);
+  }
+  return state;
+}
+
+function newParcel(match: CrowdMatch): void {
+  const state = parcelStates.get(match)!;
+  const active = activeSlots(match);
+  state.holder = active.length > 0 ? active[Math.floor(match.random() * active.length)].playerId : undefined;
+  state.fuseMs = between(match.random, ...PARCEL_FUSE_MS);
+  state.from = undefined;
+  state.noReturnMs = 0;
+}
+
+// Closing Time: the lights go out from the edges of the plaza inward. Linger in the dark and you're
+// caught; the crowd drifts in with you. Strike (E) anyone close to thin out the competition.
+export const CLOSING_START_RADIUS = 760;
+export const CLOSING_END_RADIUS = 130;
+export const CLOSING_SHRINK_FROM_MS = 8000;
+export const CLOSING_SHRINK_FOR_MS = 72000;
+export const CLOSING_DARK_LIMIT_MS = 2500;
+export const CLOSING_STRIKE_COOLDOWN_MS = 1500;
+type ClosingState = { center: CrowdVector; darkMs: Map<string, number> };
+const closingStates = new WeakMap<CrowdMatch, ClosingState>();
+
+export const closingTimeRules: CrowdRules = {
+  mode: "closing_time",
+  arena: PLAZA,
+  npcCount: 46,
+  canRun: true,
+  assignRoles: everyoneRunner,
+  shotsFor: () => 0,
+  spawnPoint: anywhere,
+  zone: closingZone,
+  npcPlan(entity, random, arena, match) {
+    const zone = closingZone(match);
+    const distance = Math.hypot(entity.x - zone.x, entity.y - zone.y);
+    // Stay comfortably inside the light, like anyone sensible would.
+    if (distance > zone.r * 0.75 && random() < 0.7) {
+      const direction = snapDirection({ x: zone.x - entity.x, y: zone.y - entity.y });
+      return { direction, durationMs: between(random, 500, 1400) };
+    }
+    return wander(entity, random, arena);
+  },
+  canAct: () => true,
+  onAct(match, slot) {
+    if (strikeNearest(match, slot)) slot.actCooldownMs = CLOSING_STRIKE_COOLDOWN_MS;
+  },
+  onShotHit: () => undefined,
+  onTick(match) {
+    const zone = closingZone(match);
+    const dark = closingState(match).darkMs;
+    for (const slot of activeSlots(match)) {
+      const outside = Math.hypot(slot.entity.x - zone.x, slot.entity.y - zone.y) > zone.r;
+      const darkMs = outside ? (dark.get(slot.playerId) ?? 0) + CROWD_TICK_MS : 0;
+      dark.set(slot.playerId, darkMs);
+      if (darkMs >= CLOSING_DARK_LIMIT_MS) match.kill(slot.entity, "sick");
+    }
+    lastOneStanding(match);
+  },
+  onTimeout: (match) => mostProgress(match, () => 1),
+  hud: (match, slot) => ({ darkMs: closingState(match).darkMs.get(slot.playerId) ?? 0, darkLimitMs: CLOSING_DARK_LIMIT_MS }),
+};
+
+function closingState(match: CrowdMatch): ClosingState {
+  let state = closingStates.get(match);
+  if (!state) {
+    const center = {
+      x: Math.round(match.arena.width / 2 + (match.random() * 2 - 1) * 200),
+      y: Math.round(match.arena.height / 2 + (match.random() * 2 - 1) * 110),
+    };
+    closingStates.set(match, (state = { center, darkMs: new Map() }));
+  }
+  return state;
+}
+
+export function closingZone(match: CrowdMatch): CrowdZone {
+  const { center } = closingState(match);
+  const t = Math.max(0, Math.min(1, (match.tick * CROWD_TICK_MS - CLOSING_SHRINK_FROM_MS) / CLOSING_SHRINK_FOR_MS));
+  return { ...center, r: Math.round(CLOSING_START_RADIUS - (CLOSING_START_RADIUS - CLOSING_END_RADIUS) * t) };
 }
 
 function everyoneRunner(playerIds: string[]): Map<string, CrowdRole> {

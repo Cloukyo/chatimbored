@@ -3,7 +3,7 @@
 
 export type CrowdVector = { x: number; y: number };
 
-export type CrowdModeId = "act_natural" | "silent_witness" | "lantern_festival" | "bell_ringers" | "heist_hour" | "marked";
+export type CrowdModeId = "act_natural" | "silent_witness" | "lantern_festival" | "bell_ringers" | "heist_hour" | "marked" | "freeze_frame" | "hot_parcel" | "closing_time";
 
 // "lookout" watches from above and has no figure in the crowd.
 export type CrowdRole = "runner" | "killer" | "hunter" | "ringer" | "lookout";
@@ -43,7 +43,12 @@ export type CrowdEvent =
   | { id: number; type: "message"; text: string }
   // A prop was used by someone. Everyone sees the flash, but not who did it.
   | { id: number; type: "flare"; prop: number }
-  | { id: number; type: "strike"; at: CrowdVector };
+  | { id: number; type: "strike"; at: CrowdVector }
+  // Someone bumped into someone, e.g. trying to pass the parcel.
+  | { id: number; type: "bump"; at: CrowdVector };
+
+// Closing Time's lit area. Anywhere outside it is dark.
+export type CrowdZone = { x: number; y: number; r: number };
 
 export type CrowdReveal = {
   entity: number;
@@ -78,6 +83,7 @@ export type CrowdView = {
   // Recent public events; clients de-duplicate by id.
   events: CrowdEvent[];
   props: CrowdProp[];
+  zone?: CrowdZone;
   // Props this player has personally used, e.g. lanterns they lit.
   mine: number[];
   hud: {
@@ -88,6 +94,12 @@ export type CrowdView = {
     // Marked: your secret target's name and a rough, periodically refreshed idea of where they are.
     markName?: string;
     hint?: CrowdVector;
+    // Hot Parcel: only the holder sees these.
+    holding?: boolean;
+    fuseSeconds?: number;
+    // Closing Time: how long you've been in the dark, out of how long you can last.
+    darkMs?: number;
+    darkLimitMs?: number;
   };
   result?: CrowdResult;
 };

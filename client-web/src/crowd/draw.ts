@@ -1,4 +1,4 @@
-import { CROWD_STATE, type CrowdEntityState, type CrowdProp, type CrowdVector } from "../../../shared/crowd/protocol.js";
+import { CROWD_STATE, type CrowdEntityState, type CrowdProp, type CrowdVector, type CrowdZone } from "../../../shared/crowd/protocol.js";
 
 export type Arena = { width: number; height: number; exitX?: number };
 
@@ -262,6 +262,35 @@ export function drawHint(ctx: CanvasRenderingContext2D, at: CrowdVector, arena: 
   ctx.beginPath();
   ctx.arc(at.x, at.y - 15, 95, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.restore();
+}
+
+// Closing Time: everything outside the lit circle is in shadow.
+export function drawDarkness(ctx: CanvasRenderingContext2D, zone: CrowdZone, arena: Arena): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, arena.width, arena.height);
+  ctx.clip();
+  ctx.beginPath();
+  ctx.rect(0, 0, arena.width, arena.height);
+  ctx.arc(zone.x, zone.y, zone.r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgb(8 10 16 / 62%)";
+  ctx.fill("evenodd");
+  ctx.strokeStyle = "rgb(255 220 150 / 35%)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(zone.x, zone.y, zone.r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// A quick "!" over someone who just got bumped.
+export function drawBump(ctx: CanvasRenderingContext2D, at: CrowdVector, age: number): void {
+  ctx.save();
+  ctx.fillStyle = `rgb(255 236 170 / ${1 - age})`;
+  ctx.font = "bold 18px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("!", at.x, at.y - 52 - age * 10);
   ctx.restore();
 }
 

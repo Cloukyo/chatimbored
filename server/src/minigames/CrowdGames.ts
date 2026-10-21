@@ -5,7 +5,10 @@ import { CrowdMatch, type CrowdRules } from "../crowd/CrowdMatch.js";
 import {
   actNaturalRules,
   bellRingersRules,
+  closingTimeRules,
+  freezeFrameRules,
   heistHourRules,
+  hotParcelRules,
   lanternFestivalRules,
   markedRules,
   silentWitnessRules,
@@ -114,3 +117,6 @@ export const crowdLanternFestival = createCrowdMinigame("crowd_lantern_festival"
 export const crowdBellRingers = createCrowdMinigame("crowd_bell_ringers", "Bell Ringers", bellRingersRules);
 export const crowdHeistHour = createCrowdMinigame("crowd_heist_hour", "Heist Hour", heistHourRules);
 export const crowdMarked = createCrowdMinigame("crowd_marked", "Marked", markedRules);
+export const crowdFreezeFrame = createCrowdMinigame("crowd_freeze_frame", "Freeze Frame", freezeFrameRules);
+export const crowdHotParcel = createCrowdMinigame("crowd_hot_parcel", "Hot Parcel", hotParcelRules);
+export const crowdClosingTime = createCrowdMinigame("crowd_closing_time", "Closing Time", closingTimeRules);

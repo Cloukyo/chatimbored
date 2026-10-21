@@ -41,6 +41,18 @@ export function parseClientMessage(raw: unknown): ClientMessage {
 function readPlayerInput(value: unknown): PlayerInputPayload {
   if (!value || typeof value !== "object") throw new Error("Unsupported player input.");
   const input = value as Record<string, unknown>;
+  if (input.kind === "crowd") {
+    const seq = readSequence(input.seq);
+    if (seq === undefined) throw new Error("Crowd input needs a positive integer seq.");
+    return {
+      kind: "crowd",
+      seq,
+      move: readVector(input.move),
+      run: input.run === true,
+      shoot: readOptionalPoint(input.shoot),
+      act: input.act === true,
+    };
+  }
   if (
     input.action === "request_hit"
     || input.action === "request_stay"

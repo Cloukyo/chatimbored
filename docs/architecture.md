@@ -2,7 +2,18 @@
 
 `chatImbored` is split into a Godot client, an authoritative WebSocket server, and shared protocol definitions.
 
-## Client
+## Browser client (crowd games)
+
+`client-web/` is a TypeScript + Vite client with its own landing page and lobby. It plays the crowd games (`crowd_act_natural`, `crowd_silent_witness`) and draws with Canvas 2D.
+
+- `src/net.ts`: WebSocket connection and server URL lookup (`?server=`, then local storage, then `VITE_SERVER_URL`, then localhost or the Railway URL).
+- `src/main.ts`: landing, lobby and results screens.
+- `src/crowd/CrowdGame.ts`: input at 20 Hz, local prediction with server reconciliation (`seq`/`ack`), and 100 ms interpolation for everyone else.
+- `src/crowd/draw.ts`: plaza, figures and effects. Every figure is drawn the same way.
+
+The server runs crowd games in `server/src/crowd/`. `CrowdMatch` owns the entities, input queues and events; `modes.ts` holds each mode's rules. Each player gets their own view: an anonymous, id-sorted entity list (shuffled ids each round), their own entity id, role and shots. Roles and player ids are only revealed in the round result.
+
+## Godot client
 
 The Godot project lives in `client-godot/`. The current client is intentionally plain and code-built:
 

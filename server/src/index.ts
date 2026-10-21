@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { MESSAGE_TYPES, type ServerMessage } from "../../shared/message-types/protocol.js";
+import { MESSAGE_TYPES, type GameSnapshot, type ServerMessage } from "../../shared/message-types/protocol.js";
 import { parseClientMessage } from "./messages/validation.js";
 import { getMinigame } from "./minigames/registry.js";
 import { RoomManager } from "./rooms/RoomManager.js";
@@ -74,11 +74,11 @@ server.listen(port, () => {
 
 function finishAndBroadcast(room: Room): void {
   manager.finishGame(room);
-  const game = room.game;
-  if (!game) return;
+  if (!room.game) return;
   for (const player of room.players) {
     const socket = sockets.get(player.id);
-    if (socket) send(socket, { type: MESSAGE_TYPES.GAME_OVER, game, winnerId: game.winnerId });
+    const game = gameFor(room, player.id);
+    if (socket && game) send(socket, { type: MESSAGE_TYPES.GAME_OVER, game, winnerId: game.winnerId });
   }
   broadcastRoom(room);
 }
@@ -87,18 +87,31 @@ function isTickBroadcastOnly(room: Room): boolean {
   return room.phase === "in_game" && getMinigame(room.selectedMinigameId)?.tickBroadcastOnly === true;
 }
 
+// The game as one player may see it. Games with hidden information build a view per player.
+function gameFor(room: Room, playerId: string, shared = room.snapshot().game): GameSnapshot | undefined {
+  const minigame = getMinigame(room.selectedMinigameId);
+  return minigame?.snapshotFor ? minigame.snapshotFor(room, playerId) : shared;
+}
+
 function broadcastTick(room: Room): void {
   if (!isTickBroadcastOnly(room)) {
     broadcastRoom(room);
     return;
   }
   // Room membership and phase don't change on a tick, so only the game state is sent.
-  const game = room.snapshot().game;
-  if (!game) return;
-  const payload = JSON.stringify({ type: MESSAGE_TYPES.GAME_STATE, game } satisfies ServerMessage);
+  const shared = room.snapshot().game;
+  if (!shared) return;
+  const perPlayer = Boolean(getMinigame(room.selectedMinigameId)?.snapshotFor);
+  const sharedPayload = perPlayer ? "" : JSON.stringify({ type: MESSAGE_TYPES.GAME_STATE, game: shared } satisfies ServerMessage);
   for (const player of room.players) {
     const socket = sockets.get(player.id);
-    if (socket && socket.readyState === socket.OPEN) socket.send(payload);
+    if (!socket || socket.readyState !== socket.OPEN) continue;
+    if (!perPlayer) {
+      socket.send(sharedPayload);
+      continue;
+    }
+    const game = gameFor(room, player.id, shared);
+    if (game) send(socket, { type: MESSAGE_TYPES.GAME_STATE, game });
   }
 }
 
@@ -108,8 +121,9 @@ function broadcastRoom(room?: Room): void {
   for (const player of room.players) {
     const socket = sockets.get(player.id);
     if (!socket) continue;
-    send(socket, { type: MESSAGE_TYPES.ROOM_STATE, room: snapshot, playerId: player.id });
-    if (snapshot.game) send(socket, { type: MESSAGE_TYPES.GAME_STATE, game: snapshot.game });
+    const game = gameFor(room, player.id, snapshot.game);
+    send(socket, { type: MESSAGE_TYPES.ROOM_STATE, room: { ...snapshot, game }, playerId: player.id });
+    if (game) send(socket, { type: MESSAGE_TYPES.GAME_STATE, game });
   }
 }
 

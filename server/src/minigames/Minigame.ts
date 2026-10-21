@@ -14,4 +14,6 @@ export type Minigame = {
   onPlayerLeft?(room: Room, playerId: string): GameSnapshot;
   update?(room: Room, deltaMs: number): GameSnapshot;
   finish(room: Room): GameSnapshot;
+  // Per-player view of the game, for games that hide information from some players.
+  snapshotFor?(room: Room, playerId: string): GameSnapshot | undefined;
 };

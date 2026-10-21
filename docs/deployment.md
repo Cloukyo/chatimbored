@@ -211,6 +211,12 @@ Railway must build from the repo root because the server imports shared TypeScri
 
 Do not upload `client-godot/builds/web/` to the Node server host. It belongs on the static web host.
 
+## Browser Client (crowd games)
+
+The crowd games run in `client-web/`. `npm run vercel-build` builds it into `client-godot/builds/web/play/`, so the existing Vercel site serves it at `/play/` next to the Godot build. No extra Vercel project is needed.
+
+It connects to `wss://chatimbored-production.up.railway.app` by default. Override it with the `VITE_SERVER_URL` environment variable at build time, or `?server=wss://...` in the page URL. Invite links look like `https://your-site.vercel.app/play/?room=ABCDE`.
+
 ## Vercel Static Client Settings
 
 Vercel should only host the exported Godot Web client. It should not run the Node WebSocket server and should not deploy this repo as a Next.js app.

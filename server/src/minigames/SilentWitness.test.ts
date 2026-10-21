@@ -36,6 +36,17 @@ function setupRoom(playerCount = 3): Room {
   return room;
 }
 
+// The Killer is random, so park the crowd far away to keep "nearest NPC" deterministic.
+function clearCrowd(room: Room): void {
+  for (const npc of room.game!.silentWitness!.npcs) {
+    npc.x = 0;
+    npc.y = 0;
+    npc.speedX = 0;
+    npc.speedY = 0;
+    npc.behaviorTimer = 1e9;
+  }
+}
+
 function killerId(room: Room): string {
   return room.game!.silentWitness!.killerId;
 }
@@ -83,6 +94,7 @@ test("Killer can mark nearby NPC for delayed death", () => {
   const room = setupRoom();
   const state = room.game!.silentWitness!;
   const killer = state.players.find((player) => player.id === killerId(room))!;
+  clearCrowd(room);
   const npc = state.npcs[0];
   npc.x = killer.x + 10;
   npc.y = killer.y;
@@ -98,6 +110,7 @@ test("Killer cannot kill NPC outside range", () => {
   const room = setupRoom();
   const state = room.game!.silentWitness!;
   const killer = state.players.find((player) => player.id === killerId(room))!;
+  clearCrowd(room);
   const npc = state.npcs[0];
   npc.x = killer.x + 300;
   npc.y = killer.y;
@@ -112,6 +125,7 @@ test("NPC death is delayed before becoming publicly dead", () => {
   const room = setupRoom();
   const state = room.game!.silentWitness!;
   const killer = state.players.find((player) => player.id === killerId(room))!;
+  clearCrowd(room);
   const npc = state.npcs[0];
   npc.x = killer.x + 8;
   npc.y = killer.y;
@@ -131,6 +145,7 @@ test("Killer wins after reaching the kill target", () => {
   const room = setupRoom();
   const state = room.game!.silentWitness!;
   const killer = state.players.find((player) => player.id === killerId(room))!;
+  clearCrowd(room);
 
   for (let index = 0; index < SILENT_WITNESS_KILL_TARGET; index += 1) {
     const npc = state.npcs[index];

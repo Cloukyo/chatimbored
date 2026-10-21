@@ -9,9 +9,8 @@ The Godot project lives in `client-godot/`. The current client is intentionally 
 - `scenes/Landing.tscn`: display name, create room, join room.
 - `scenes/Lobby.tscn`: room code, share placeholder, player list, ready state, host start.
 - `scenes/GameScreen.tscn`: active minigame UI and results.
-- `scenes/ButtonRace.tscn`: placeholder minigame scene entry.
 - `scripts/NetworkManager.gd`: WebSocket singleton/autoload.
-- `scripts/RoomState.gd` and `scripts/PlayerState.gd`: client-side state models.
+- `scripts/RoomState.gd`: client-side room state model.
 
 The client sends requests and renders server snapshots. It does not decide scores, winners, readiness validity, or room phase.
 

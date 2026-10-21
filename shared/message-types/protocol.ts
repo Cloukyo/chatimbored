@@ -337,5 +337,4 @@ export type ServerMessage =
   | { type: "ROOM_STATE"; room: RoomSnapshot; playerId: string }
   | { type: "GAME_STATE"; game: GameSnapshot }
   | { type: "GAME_OVER"; game: GameSnapshot; winnerId?: string }
-  | { type: "RETURN_TO_LOBBY"; room: RoomSnapshot }
   | { type: "ERROR"; message: string };

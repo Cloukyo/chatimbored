@@ -198,3 +198,26 @@ test("existing minigames still expose their ids with Silent Witness", () => {
   assert.ok(ids.includes("loot_and_leave"));
   assert.ok(ids.includes("silent_witness"));
 });
+
+test("the Killer is not the same player every round in the same room", () => {
+  const room = makeRoom(4);
+  const killers = new Set<string>();
+  for (let round = 0; round < 40; round += 1) killers.add(silentWitness.setup(room).silentWitness!.killerId);
+
+  assert.ok(killers.size > 1);
+});
+
+test("starting a round in one room does not wipe held movement in another room", () => {
+  const roomA = setupRoom(2);
+  const mover = roomA.game!.silentWitness!.players[0];
+  const startX = mover.x;
+  silentWitness.handleInput(roomA, mover.id, input({ movement: { x: 1, y: 0 } }));
+
+  const roomB = new Room("OTHER");
+  roomB.addPlayer({ id: "b1", displayName: "B1", isHost: true, isReady: true, score: 0 });
+  roomB.addPlayer({ id: "b2", displayName: "B2", isHost: false, isReady: true, score: 0 });
+  roomB.game = silentWitness.setup(roomB);
+
+  silentWitness.update(roomA, 500);
+  assert.ok(mover.x > startX);
+});

@@ -1,7 +1,7 @@
 import "./style.css";
 import type { GameSnapshot, RoomSnapshot, ServerMessage } from "../../shared/message-types/protocol.js";
 import { CrowdGame } from "./crowd/CrowdGame.js";
-import { Connection, resolveServerUrl } from "./net.js";
+import { Connection, resolveServerUrl, wakeServer } from "./net.js";
 
 const MODES = [
   {
@@ -25,12 +25,20 @@ let selectedMode: string = MODES[0].id;
 let game: CrowdGame | undefined;
 let toastTimer: number | undefined;
 
-const connection = new Connection(resolveServerUrl(), onMessage, (reason) => {
-  showToast(`${reason} Refresh to reconnect.`);
-  room = undefined;
-  stopGame();
-  show("landing");
-});
+const serverUrl = resolveServerUrl();
+wakeServer(serverUrl);
+const connection = new Connection(
+  serverUrl,
+  onMessage,
+  (reason) => {
+    showToast(`${reason} Refresh to reconnect.`);
+    $("landing-status").textContent = "";
+    room = undefined;
+    stopGame();
+    show("landing");
+  },
+  () => ($("landing-status").textContent = "Waking up the game server. This can take up to a minute the first time."),
+);
 
 // Landing ---------------------------------------------------------------
 
@@ -216,6 +224,7 @@ function showResults(snapshot: GameSnapshot): void {
 function onMessage(message: ServerMessage): void {
   switch (message.type) {
     case "ROOM_STATE": {
+      $("landing-status").textContent = "";
       room = message.room;
       playerId = message.playerId;
       if (room.selectedMinigameId.startsWith("crowd_")) selectedMode = room.selectedMinigameId;

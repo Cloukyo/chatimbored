@@ -23,5 +23,12 @@
         }
       ]
     }
+  ],
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/play/",
+      "permanent": false
+    }
   ]
 }

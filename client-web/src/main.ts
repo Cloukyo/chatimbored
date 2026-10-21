@@ -34,6 +34,21 @@ const MODES = [
     name: "Marked",
     blurb: "You're hunting one player and someone's hunting you. Strike your mark to take over theirs. Strike the wrong person and you're left dazed.",
   },
+  {
+    id: "crowd_freeze_frame",
+    name: "Freeze Frame",
+    blurb: "Race the crowd to the exit. Every so often everyone freezes without warning. Keep walking and you'll stand out. One shot each.",
+  },
+  {
+    id: "crowd_hot_parcel",
+    name: "Hot Parcel",
+    blurb: "Someone's holding a ticking parcel and only they know it. Bump into another player to pass it on before it goes off. Last one standing wins.",
+  },
+  {
+    id: "crowd_closing_time",
+    name: "Closing Time",
+    blurb: "The lights go out from the edges in. Stay in the light with the crowd, strike anyone close, and be the last one standing.",
+  },
 ] as const;
 
 const ROLE_NAMES = { runner: "", killer: "Killer", hunter: "Hunter", ringer: "Ringer", lookout: "Lookout" } as const;

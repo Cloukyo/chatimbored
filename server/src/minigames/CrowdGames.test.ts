@@ -9,15 +9,25 @@ import {
   LANTERN_GOAL,
   LOOKOUT_ARROWS,
   MARKED_GOAL,
+  CLOSING_DARK_LIMIT_MS,
+  CLOSING_END_RADIUS,
+  FREEZE_GAP_MS,
+  PARCEL_FUSE_MS,
   SILENT_WITNESS_KILL_TARGET,
+  closingZone,
+  freezeState,
   markedState,
+  parcelState,
 } from "../crowd/modes.js";
 import { seededRandom } from "../crowd/random.js";
 import { Room } from "../rooms/Room.js";
 import {
   crowdActNatural,
   crowdBellRingers,
+  crowdClosingTime,
+  crowdFreezeFrame,
   crowdHeistHour,
+  crowdHotParcel,
   crowdLanternFestival,
   crowdMarked,
   crowdMatchFor,
@@ -388,4 +398,102 @@ test("Marked: everyone gets a rough hint of where their mark is", () => {
     assert.ok(Math.abs(mine.hud.hint!.x - target.x) <= 75);
   }
   assert.equal(MARKED_GOAL, 3);
+});
+
+test("Freeze Frame: the whole crowd stops together, then starts again", () => {
+  const { room, match } = start(crowdFreezeFrame, 2);
+  const npcs = match.entities.filter((entity) => entity.brain);
+  let ticks = 0;
+  while (freezeState(match).frozenMs === 0 && ticks < FREEZE_GAP_MS[1] / 50 + 5) {
+    crowdFreezeFrame.update!(room, 50);
+    ticks += 1;
+  }
+  assert.ok(freezeState(match).frozenMs > 0);
+  crowdFreezeFrame.update!(room, 50);
+  assert.ok(npcs.every((npc) => npc.direction.x === 0 && npc.direction.y === 0));
+  const before = npcs.map((npc) => [npc.x, npc.y]);
+  crowdFreezeFrame.update!(room, 50);
+  assert.deepEqual(npcs.map((npc) => [npc.x, npc.y]), before);
+
+  for (let tick = 0; tick < 120; tick += 1) crowdFreezeFrame.update!(room, 50);
+  assert.ok(npcs.some((npc) => npc.direction.x !== 0 || npc.direction.y !== 0));
+});
+
+test("Freeze Frame: players aren't frozen, and the exit still wins", () => {
+  const { room, match } = start(crowdFreezeFrame, 2);
+  freezeState(match).untilFreezeMs = 0;
+  const entity = entityOf(match, "p1");
+  entity.x = ACT_NATURAL_EXIT_X - 2;
+  send(crowdFreezeFrame, room, "p1", { move: { x: 1, y: 0 } });
+  assert.ok(freezeState(match).frozenMs > 0);
+  assert.equal(room.game!.winnerId, "p1");
+});
+
+test("Hot Parcel: only the holder knows, and bumping a player passes it on", () => {
+  const { room, match } = start(crowdHotParcel, 3);
+  clearCrowd(match);
+  crowdHotParcel.update!(room, 50);
+  const state = parcelState(match);
+  const holder = state.holder!;
+  const other = ["p1", "p2", "p3"].find((id) => id !== holder)!;
+  assert.equal(view(crowdHotParcel, room, holder).hud.holding, true);
+  assert.equal(view(crowdHotParcel, room, other).hud.holding, false);
+  assert.equal(view(crowdHotParcel, room, other).hud.fuseSeconds, undefined);
+
+  standAt(match, holder, { x: 640, y: 300 });
+  standAt(match, other, { x: 660, y: 300 });
+  send(crowdHotParcel, room, holder, { act: true });
+  assert.equal(state.holder, other);
+  assert.ok(view(crowdHotParcel, room, "p1").events.some((event) => event.type === "bump"));
+
+  // No handing it straight back.
+  match.slots.get(other)!.actCooldownMs = 0;
+  send(crowdHotParcel, room, other, { act: true });
+  assert.equal(state.holder, other);
+});
+
+test("Hot Parcel: bumping an NPC wastes the move", () => {
+  const { room, match } = start(crowdHotParcel, 2);
+  clearCrowd(match);
+  crowdHotParcel.update!(room, 50);
+  const state = parcelState(match);
+  const holder = state.holder!;
+  const npc = match.entities.find((entity) => entity.brain)!;
+  standAt(match, holder, { x: 640, y: 300 });
+  npc.x = 660;
+  npc.y = 300;
+  send(crowdHotParcel, room, holder, { act: true });
+  assert.equal(state.holder, holder);
+  assert.equal(npc.dead, false);
+});
+
+test("Hot Parcel: when the fuse runs out the holder is out, and the last one standing wins", () => {
+  const { room, match } = start(crowdHotParcel, 2);
+  crowdHotParcel.update!(room, 50);
+  const holder = parcelState(match).holder!;
+  for (let tick = 0; tick < PARCEL_FUSE_MS[1] / 50 + 2 && !room.game!.winnerId; tick += 1) crowdHotParcel.update!(room, 50);
+  assert.equal(entityOf(match, holder).dead, true);
+  assert.equal(room.game!.winnerId, holder === "p1" ? "p2" : "p1");
+});
+
+test("Closing Time: the light shrinks, and lingering in the dark gets you caught", () => {
+  const { room, match } = start(crowdClosingTime, 3);
+  const zone = closingZone(match);
+  assert.ok(zone.r > 700);
+  match.tick = 1700;
+  assert.equal(closingZone(match).r, CLOSING_END_RADIUS);
+  match.tick = 600;
+
+  const now = closingZone(match);
+  const outsider = entityOf(match, "p1");
+  outsider.x = now.x > 640 ? 30 : 1250;
+  outsider.y = 690;
+  standAt(match, "p2", { x: now.x, y: now.y });
+  standAt(match, "p3", { x: now.x + 10, y: now.y });
+  for (let tick = 0; tick < CLOSING_DARK_LIMIT_MS / 50 - 1; tick += 1) crowdClosingTime.update!(room, 50);
+  assert.equal(outsider.dead, false);
+  assert.ok(view(crowdClosingTime, room, "p1").hud.darkMs! > 0);
+  crowdClosingTime.update!(room, 50);
+  assert.equal(outsider.dead, true);
+  assert.ok(view(crowdClosingTime, room, "p2").zone);
 });

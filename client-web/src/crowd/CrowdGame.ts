@@ -9,7 +9,9 @@ import {
 import {
   type Figure,
   type View2D,
+  drawBump,
   drawCrosshair,
+  drawDarkness,
   drawFigure,
   drawHint,
   drawNameTag,
@@ -29,7 +31,9 @@ const PUFF_EFFECT_MS = 500;
 const STRIKE_EFFECT_MS = 300;
 const FLARE_EFFECT_MS = 900;
 
-const EFFECT_MS = { shot: SHOT_EFFECT_MS, puff: PUFF_EFFECT_MS, strike: STRIKE_EFFECT_MS };
+const BUMP_EFFECT_MS = 600;
+
+const EFFECT_MS = { shot: SHOT_EFFECT_MS, puff: PUFF_EFFECT_MS, strike: STRIKE_EFFECT_MS, bump: BUMP_EFFECT_MS };
 
 const MODE_TITLES: Record<CrowdView["mode"], string> = {
   act_natural: "Act Natural",
@@ -38,13 +42,16 @@ const MODE_TITLES: Record<CrowdView["mode"], string> = {
   bell_ringers: "Bell Ringers",
   heist_hour: "Heist Hour",
   marked: "Marked",
+  freeze_frame: "Freeze Frame",
+  hot_parcel: "Hot Parcel",
+  closing_time: "Closing Time",
 };
 
 type Snapshot = { time: number; figures: Map<number, Figure> };
 type Pending = { seq: number; direction: CrowdVector; run: boolean };
 type Effect =
   | { born: number; kind: "shot"; from: CrowdVector; to: CrowdVector }
-  | { born: number; kind: "puff" | "strike"; at: CrowdVector };
+  | { born: number; kind: "puff" | "strike" | "bump"; at: CrowdVector };
 
 const KEYS = {
   up: ["KeyW", "ArrowUp"],
@@ -230,6 +237,7 @@ export class CrowdGame {
         if (figure) this.effects.push({ born: now, kind: "puff", at: { x: figure.x, y: figure.y } });
       }
       if (event.type === "strike") this.effects.push({ born: now, kind: "strike", at: event.at });
+      if (event.type === "bump") this.effects.push({ born: now, kind: "bump", at: event.at });
       if (event.type === "flare") this.flares.set(event.prop, now);
     }
   }
@@ -266,6 +274,20 @@ export class CrowdGame {
           "the red ring is roughly where they were",
           `Marks ${progress}`,
           view.canAct ? "E strikes, but the wrong person leaves you dazed" : "Recovering",
+        ];
+      case "freeze_frame":
+        return ["Reach the exit first", "When the crowd freezes, freeze with it", shot("whoever kept walking")];
+      case "hot_parcel":
+        return view.hud.holding
+          ? [`<b>You have the parcel!</b> ${view.hud.fuseSeconds ?? 0}s`, "E next to someone hands it over, if they're a player"]
+          : ["Someone has the parcel", "Keep clear of anyone bumping into people", "Last one standing wins"];
+      case "closing_time":
+        return [
+          view.alive && (view.hud.darkMs ?? 0) > 0
+            ? `<b>You're in the dark!</b> ${(((view.hud.darkLimitMs ?? 0) - (view.hud.darkMs ?? 0)) / 1000).toFixed(1)}s`
+            : "Stay in the light",
+          "E strikes anyone close",
+          "Last one standing wins",
         ];
     }
   }
@@ -319,11 +341,14 @@ export class CrowdGame {
     const ordered = [...figures.values()].sort((a, b) => a.y - b.y);
     for (const figure of ordered) drawFigure(ctx, figure, now, figure.id === view.you);
 
+    if (view.zone) drawDarkness(ctx, view.zone, view.arena);
+
     this.effects = this.effects.filter((effect) => now - effect.born < EFFECT_MS[effect.kind]);
     for (const effect of this.effects) {
       const age = (now - effect.born) / EFFECT_MS[effect.kind];
       if (effect.kind === "shot") drawShot(ctx, effect.from, effect.to, age);
       else if (effect.kind === "strike") drawStrike(ctx, effect.at, age);
+      else if (effect.kind === "bump") drawBump(ctx, effect.at, age);
       else drawPuff(ctx, effect.at, age);
     }
 

@@ -14,7 +14,29 @@ const MODES = [
     name: "Silent Witness",
     blurb: "One of you is the Killer, quietly picking off the crowd. Everyone else gets one shot. Five bodies and the Killer wins.",
   },
+  {
+    id: "crowd_lantern_festival",
+    name: "Lantern Festival",
+    blurb: "Light all five lanterns to win. Every lantern flares when it's lit, so others will be watching. Anyone in reach can be struck down.",
+  },
+  {
+    id: "crowd_bell_ringers",
+    name: "Bell Ringers",
+    blurb: "A few Ringers hide in the crowd and must ring all four bells. Everyone else watches from above with two arrows each.",
+  },
+  {
+    id: "crowd_heist_hour",
+    name: "Heist Hour",
+    blurb: "Crack three different vaults to win. Each one sounds an alarm when cracked. One shot each for whoever looks guilty.",
+  },
+  {
+    id: "crowd_marked",
+    name: "Marked",
+    blurb: "You're hunting one player and someone's hunting you. Strike your mark to take over theirs. Strike the wrong person and you're left dazed.",
+  },
 ] as const;
+
+const ROLE_NAMES = { runner: "", killer: "Killer", hunter: "Hunter", ringer: "Ringer", lookout: "Lookout" } as const;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const screens = { landing: $("landing"), lobby: $("lobby"), game: $("game") };
@@ -198,7 +220,11 @@ function showResults(snapshot: GameSnapshot): void {
         ? `The Killer, ${name(result.winnerPlayerId)}, wins!`
         : result.winner === "hunters"
           ? "The Hunters win!"
-          : "Nobody made it.";
+          : result.winner === "ringers"
+            ? "The Ringers win!"
+            : result.winner === "lookouts"
+              ? "The Lookouts win!"
+              : "Nobody won this one.";
   $("results-title").textContent = title;
   $("reveal").replaceChildren(
     ...result.reveal.map((entry) => {
@@ -207,7 +233,7 @@ function showResults(snapshot: GameSnapshot): void {
       who.textContent = name(entry.playerId);
       const what = document.createElement("span");
       what.className = "tag";
-      const role = entry.role === "runner" ? "" : entry.role === "killer" ? "Killer · " : "Hunter · ";
+      const role = entry.role === "runner" ? "" : `${ROLE_NAMES[entry.role]} · `;
       what.textContent = `${role}${entry.alive ? "survived" : "down"}`;
       item.append(who, what);
       return item;

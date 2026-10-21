@@ -6,16 +6,45 @@ import {
   type CrowdVector,
   type CrowdView,
 } from "../../../shared/crowd/protocol.js";
-import { type Figure, type View2D, drawFigure, drawNameTag, drawPuff, drawShot, fitArena, paintFloor, toWorld } from "./draw.js";
+import {
+  type Figure,
+  type View2D,
+  drawCrosshair,
+  drawFigure,
+  drawHint,
+  drawNameTag,
+  drawProp,
+  drawPuff,
+  drawShot,
+  drawStrike,
+  fitArena,
+  paintFloor,
+  toWorld,
+} from "./draw.js";
 
 // Others are drawn this far in the past so there are always two snapshots to blend between.
 const INTERPOLATION_DELAY_MS = 100;
 const SHOT_EFFECT_MS = 260;
 const PUFF_EFFECT_MS = 500;
+const STRIKE_EFFECT_MS = 300;
+const FLARE_EFFECT_MS = 900;
+
+const EFFECT_MS = { shot: SHOT_EFFECT_MS, puff: PUFF_EFFECT_MS, strike: STRIKE_EFFECT_MS };
+
+const MODE_TITLES: Record<CrowdView["mode"], string> = {
+  act_natural: "Act Natural",
+  silent_witness: "Silent Witness",
+  lantern_festival: "Lantern Festival",
+  bell_ringers: "Bell Ringers",
+  heist_hour: "Heist Hour",
+  marked: "Marked",
+};
 
 type Snapshot = { time: number; figures: Map<number, Figure> };
 type Pending = { seq: number; direction: CrowdVector; run: boolean };
-type Effect = { born: number; kind: "shot"; from: CrowdVector; to: CrowdVector } | { born: number; kind: "puff"; at: CrowdVector };
+type Effect =
+  | { born: number; kind: "shot"; from: CrowdVector; to: CrowdVector }
+  | { born: number; kind: "puff" | "strike"; at: CrowdVector };
 
 const KEYS = {
   up: ["KeyW", "ArrowUp"],
@@ -44,6 +73,8 @@ export class CrowdGame {
   private predicted?: { from: CrowdVector; to: CrowdVector; steppedAt: number; facing: number; moving: boolean; running: boolean };
   private readonly seenEvents = new Set<number>();
   private effects: Effect[] = [];
+  private readonly flares = new Map<number, number>();
+  private pointer?: CrowdVector;
   private inputTimer?: number;
   private frame?: number;
   private readonly abort = new AbortController();
@@ -67,6 +98,8 @@ export class CrowdGame {
       },
       { signal },
     );
+    canvas.addEventListener("pointermove", (event) => (this.pointer = toWorld(this.viewport, this.canvasPoint(event))), { signal });
+    canvas.addEventListener("pointerleave", () => (this.pointer = undefined), { signal });
     canvas.addEventListener("contextmenu", (event) => event.preventDefault(), { signal });
     this.resize();
     this.inputTimer = window.setInterval(() => this.tickInput(), CROWD_TICK_MS);
@@ -147,7 +180,7 @@ export class CrowdGame {
 
   private selfFrozen(): boolean {
     const self = this.latestSelf();
-    return !self || self.state === CROWD_STATE.DEAD || self.state === CROWD_STATE.SICK;
+    return !self || isFrozen(self.state);
   }
 
   private latestSelf(): Figure | undefined {
@@ -162,7 +195,7 @@ export class CrowdGame {
     this.pending = this.pending.filter((input) => input.seq > view.ack);
     let position: CrowdVector = { x: self.x, y: self.y };
     let facing = self.facing;
-    const frozen = self.state === CROWD_STATE.DEAD || self.state === CROWD_STATE.SICK;
+    const frozen = isFrozen(self.state);
     if (!frozen) {
       for (const input of this.pending) {
         position = stepPosition(position, input.direction, input.run, view.arena);
@@ -196,32 +229,45 @@ export class CrowdGame {
         const figure = figures.get(event.entity);
         if (figure) this.effects.push({ born: now, kind: "puff", at: { x: figure.x, y: figure.y } });
       }
+      if (event.type === "strike") this.effects.push({ born: now, kind: "strike", at: event.at });
+      if (event.type === "flare") this.flares.set(event.prop, now);
     }
   }
 
   private updateHud(): void {
     const view = this.view;
     if (!view) return;
-    const parts: string[] = [];
-    if (view.mode === "act_natural") {
-      parts.push("<b>Act Natural</b>");
-      parts.push(view.alive ? "Reach the exit first" : "You were spotted");
-      parts.push(view.shots > 0 ? "Click to shoot (1 shot)" : "Shot used");
-      parts.push("Shift runs, but people notice");
-    } else {
-      parts.push("<b>Silent Witness</b>");
-      if (view.role === "killer") {
-        parts.push("You are the <b>Killer</b>");
-        parts.push(view.canAct ? "E to strike someone close" : "Strike recharging");
-      } else {
-        parts.push("You are a <b>Hunter</b>");
-        parts.push(view.shots > 0 ? "Click to shoot the Killer" : "Shot used");
-      }
-      parts.push(`Bodies ${view.hud.kills ?? 0}/${view.hud.killTarget ?? 5}`);
-      if (!view.alive) parts.push("You're down");
-    }
-    parts.unshift(`<span data-timer></span>`);
+    const parts = [`<span data-timer></span>`, `<b>${MODE_TITLES[view.mode]}</b>`, ...this.hudLines(view)];
+    if (!view.alive) parts.push("You're down");
     this.hud.innerHTML = parts.join(" · ");
+  }
+
+  private hudLines(view: CrowdView): string[] {
+    const progress = `${view.hud.progress ?? 0}/${view.hud.goal ?? 0}`;
+    const shot = (aim: string) => (view.shots > 0 ? `Click to shoot ${aim} (${view.shots} left)` : "Out of shots");
+    switch (view.mode) {
+      case "act_natural":
+        return ["Reach the exit first", shot("a rival"), "Shift runs, but people notice"];
+      case "silent_witness":
+        return view.role === "killer"
+          ? ["You are the <b>Killer</b>", view.canAct ? "E to strike someone close" : "Strike recharging", `Bodies ${view.hud.kills ?? 0}/${view.hud.killTarget ?? 5}`]
+          : ["You are a <b>Hunter</b>", shot("the Killer"), `Bodies ${view.hud.kills ?? 0}/${view.hud.killTarget ?? 5}`];
+      case "lantern_festival":
+        return [`Lanterns ${progress}`, "E next to a lantern lights it", "E next to anyone else strikes them", "Last one standing also wins"];
+      case "bell_ringers":
+        return view.role === "ringer"
+          ? ["You are a <b>Ringer</b>", "E next to a bell rings it", `Bells ${progress}`]
+          : ["You are a <b>Lookout</b>", shot("a Ringer"), `Bells ${progress}`];
+      case "heist_hour":
+        return [`Vaults ${progress}`, "E at a vault cracks it (3 different ones)", shot("a rival")];
+      case "marked":
+        return [
+          view.hud.markName ? `Your mark: <b>${escapeHtml(this.nameOf(view.hud.markName))}</b>` : "No mark left",
+          "the red ring is roughly where they were",
+          `Marks ${progress}`,
+          view.canAct ? "E strikes, but the wrong person leaves you dazed" : "Recovering",
+        ];
+    }
   }
 
   private resize(): void {
@@ -263,25 +309,38 @@ export class CrowdGame {
       }
     }
 
+    for (const prop of view.props) {
+      const flaredAt = this.flares.get(prop.id);
+      const flare = flaredAt === undefined ? 0 : Math.max(0, 1 - (now - flaredAt) / FLARE_EFFECT_MS);
+      drawProp(ctx, prop, view.mine.includes(prop.id), flare, now);
+    }
+    if (view.hud.hint && !view.result) drawHint(ctx, view.hud.hint, view.arena, now);
+
     const ordered = [...figures.values()].sort((a, b) => a.y - b.y);
     for (const figure of ordered) drawFigure(ctx, figure, now, figure.id === view.you);
 
-    this.effects = this.effects.filter((effect) => now - effect.born < (effect.kind === "shot" ? SHOT_EFFECT_MS : PUFF_EFFECT_MS));
+    this.effects = this.effects.filter((effect) => now - effect.born < EFFECT_MS[effect.kind]);
     for (const effect of this.effects) {
-      if (effect.kind === "shot") drawShot(ctx, effect.from, effect.to, (now - effect.born) / SHOT_EFFECT_MS);
-      else drawPuff(ctx, effect.at, (now - effect.born) / PUFF_EFFECT_MS);
+      const age = (now - effect.born) / EFFECT_MS[effect.kind];
+      if (effect.kind === "shot") drawShot(ctx, effect.from, effect.to, age);
+      else if (effect.kind === "strike") drawStrike(ctx, effect.at, age);
+      else drawPuff(ctx, effect.at, age);
     }
 
     if (view.result) {
       for (const entry of view.result.reveal) {
         const figure = figures.get(entry.entity);
         if (!figure) continue;
-        const color = entry.role === "killer" ? "#e9806b" : entry.playerId === view.result.winnerPlayerId ? "#e0a64a" : "#ece6d6";
-        const label = entry.role === "killer" ? `${this.nameOf(entry.playerId)} (Killer)` : this.nameOf(entry.playerId);
+        const won = entry.playerId === view.result.winnerPlayerId || entry.role === view.result.winnerRole;
+        const color = entry.role === "killer" ? "#e9806b" : won ? "#e0a64a" : "#ece6d6";
+        const suffix = entry.role === "killer" ? " (Killer)" : entry.role === "ringer" ? " (Ringer)" : "";
+        const label = `${this.nameOf(entry.playerId)}${suffix}`;
         drawNameTag(ctx, figure, label, color);
       }
     } else if (self) {
       drawNameTag(ctx, self, "You", "#e0a64a");
+    } else if (view.role === "lookout" && this.pointer) {
+      drawCrosshair(ctx, this.pointer, view.shots > 0);
     }
     ctx.restore();
   }
@@ -314,6 +373,14 @@ export class CrowdGame {
     }
     return result;
   }
+}
+
+function isFrozen(state: CrowdEntityState): boolean {
+  return state === CROWD_STATE.DEAD || state === CROWD_STATE.SICK || state === CROWD_STATE.STUNNED;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
 
 function unpack(packed: number[]): Map<number, Figure> {

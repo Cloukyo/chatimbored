@@ -1,4 +1,4 @@
-import { CROWD_STATE, type CrowdEntityState, type CrowdVector } from "../../../shared/crowd/protocol.js";
+import { CROWD_STATE, type CrowdEntityState, type CrowdProp, type CrowdVector } from "../../../shared/crowd/protocol.js";
 
 export type Arena = { width: number; height: number; exitX?: number };
 
@@ -108,7 +108,8 @@ export function drawFigure(ctx: CanvasRenderingContext2D, figure: Figure, time: 
   const swing = moving ? Math.sin(phase) * (state === CROWD_STATE.RUN ? 5 : 3.5) : 0;
   const bob = moving ? Math.abs(Math.sin(phase)) * 1.5 : 0;
   const sick = state === CROWD_STATE.SICK;
-  const wobble = sick ? Math.sin(time * 0.012 + figure.id) * 0.12 : 0;
+  const stunned = state === CROWD_STATE.STUNNED;
+  const wobble = sick || stunned ? Math.sin(time * (stunned ? 0.02 : 0.012) + figure.id) * 0.12 : 0;
   const lean = state === CROWD_STATE.RUN ? Math.cos((figure.facing * Math.PI) / 4) * 0.18 : 0;
   ctx.rotate(wobble + lean);
 
@@ -144,6 +145,141 @@ export function drawFigure(ctx: CanvasRenderingContext2D, figure: Figure, time: 
   ctx.fill();
   ctx.fillRect(dx * 1.2 - 5.5, -44, 11, 7);
 
+  if (state === CROWD_STATE.STUNNED) drawDizzy(ctx, time, figure.id);
+
+  ctx.restore();
+}
+
+// Little orbiting stars over a stunned head.
+function drawDizzy(ctx: CanvasRenderingContext2D, time: number, seed: number): void {
+  ctx.fillStyle = "#f3d36b";
+  for (let index = 0; index < 3; index += 1) {
+    const angle = time * 0.006 + seed + (index * Math.PI * 2) / 3;
+    ctx.beginPath();
+    ctx.arc(Math.cos(angle) * 10, -50 + Math.sin(angle) * 3, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// `flare` runs 1 → 0 just after someone used the prop. `mine` marks props this player has used.
+export function drawProp(ctx: CanvasRenderingContext2D, prop: CrowdProp, mine: boolean, flare: number, time: number): void {
+  ctx.save();
+  ctx.translate(prop.x, prop.y);
+  ctx.fillStyle = "rgb(0 0 0 / 25%)";
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 18, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (flare > 0) {
+    ctx.fillStyle = `rgb(255 214 120 / ${flare * 0.45})`;
+    ctx.beginPath();
+    ctx.arc(0, -24, 26 + (1 - flare) * 40, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (prop.kind === "lantern") {
+    ctx.fillStyle = "#3a3530";
+    ctx.fillRect(-2, -40, 4, 40);
+    const glow = mine ? 0.85 + Math.sin(time * 0.005) * 0.1 : 0.25;
+    ctx.fillStyle = mine ? `rgb(244 160 70 / ${glow})` : "#8a4d3a";
+    ctx.beginPath();
+    ctx.ellipse(0, -46, 11, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#2c2622";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = "#2c2622";
+    ctx.fillRect(-6, -62, 12, 3);
+    ctx.fillRect(-6, -33, 12, 3);
+  } else if (prop.kind === "bell") {
+    ctx.fillStyle = "#4b3a2a";
+    ctx.fillRect(-16, -54, 4, 54);
+    ctx.fillRect(12, -54, 4, 54);
+    ctx.fillRect(-18, -58, 36, 5);
+    const swing = prop.on ? Math.sin(time * 0.01) * 0.25 : 0;
+    ctx.save();
+    ctx.translate(0, -53);
+    ctx.rotate(swing);
+    ctx.fillStyle = prop.on ? "#f0c25a" : "#9b7b3a";
+    ctx.beginPath();
+    ctx.moveTo(-6, 2);
+    ctx.quadraticCurveTo(-7, 18, -11, 22);
+    ctx.lineTo(11, 22);
+    ctx.quadraticCurveTo(7, 18, 6, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  } else {
+    ctx.fillStyle = prop.on ? "#b9453a" : "#5f6670";
+    roundRect(ctx, -16, -34, 32, 30, 4);
+    ctx.fillStyle = "#3b4048";
+    ctx.beginPath();
+    ctx.arc(0, -19, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#cfd3d8";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -19);
+    ctx.lineTo(5, -23);
+    ctx.stroke();
+    if (prop.on && Math.floor(time / 250) % 2 === 0) {
+      ctx.fillStyle = "#ff6b5a";
+      ctx.beginPath();
+      ctx.arc(0, -40, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  if (mine && prop.kind !== "lantern") {
+    ctx.fillStyle = "#e0a64a";
+    ctx.font = "bold 14px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("✓", 0, prop.kind === "bell" ? -64 : -44);
+  }
+  ctx.restore();
+}
+
+export function drawStrike(ctx: CanvasRenderingContext2D, at: CrowdVector, age: number): void {
+  const life = 1 - age;
+  ctx.save();
+  ctx.strokeStyle = `rgb(240 240 240 / ${life})`;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y - 22, 14 + age * 6, -Math.PI * 0.9, -Math.PI * 0.2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Marked: a soft ring around where your mark roughly was at the last hint.
+export function drawHint(ctx: CanvasRenderingContext2D, at: CrowdVector, arena: Arena, time: number): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, arena.width, arena.height);
+  ctx.clip();
+  ctx.strokeStyle = `rgb(233 128 107 / ${0.35 + Math.sin(time * 0.004) * 0.12})`;
+  ctx.setLineDash([8, 8]);
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y - 15, 95, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+export function drawCrosshair(ctx: CanvasRenderingContext2D, at: CrowdVector, ready: boolean): void {
+  ctx.save();
+  ctx.strokeStyle = ready ? "rgb(255 226 120 / 90%)" : "rgb(236 230 214 / 40%)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(at.x, at.y, 14, 0, Math.PI * 2);
+  ctx.moveTo(at.x - 22, at.y);
+  ctx.lineTo(at.x - 6, at.y);
+  ctx.moveTo(at.x + 6, at.y);
+  ctx.lineTo(at.x + 22, at.y);
+  ctx.moveTo(at.x, at.y - 22);
+  ctx.lineTo(at.x, at.y - 6);
+  ctx.moveTo(at.x, at.y + 6);
+  ctx.lineTo(at.x, at.y + 22);
+  ctx.stroke();
   ctx.restore();
 }
 

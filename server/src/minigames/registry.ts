@@ -1,5 +1,12 @@
 import { buttonRace } from "./ButtonRace.js";
-import { crowdActNatural, crowdSilentWitness } from "./CrowdGames.js";
+import {
+  crowdActNatural,
+  crowdBellRingers,
+  crowdHeistHour,
+  crowdLanternFestival,
+  crowdMarked,
+  crowdSilentWitness,
+} from "./CrowdGames.js";
 import { actNatural } from "./ActNatural.js";
 import { lootAndLeave } from "./LootAndLeave.js";
 import { luckySeven } from "./LuckySeven.js";
@@ -28,3 +35,7 @@ registerMinigame(silentWitness);
 registerMinigame(luckySeven);
 registerMinigame(crowdActNatural);
 registerMinigame(crowdSilentWitness);
+registerMinigame(crowdLanternFestival);
+registerMinigame(crowdBellRingers);
+registerMinigame(crowdHeistHour);
+registerMinigame(crowdMarked);

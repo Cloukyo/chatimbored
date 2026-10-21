@@ -2,7 +2,14 @@ import type { CrowdInput } from "../../../shared/crowd/protocol.js";
 import { CROWD_TICK_MS } from "../../../shared/crowd/movement.js";
 import type { GameSnapshot } from "../../../shared/message-types/protocol.js";
 import { CrowdMatch, type CrowdRules } from "../crowd/CrowdMatch.js";
-import { actNaturalRules, silentWitnessRules } from "../crowd/modes.js";
+import {
+  actNaturalRules,
+  bellRingersRules,
+  heistHourRules,
+  lanternFestivalRules,
+  markedRules,
+  silentWitnessRules,
+} from "../crowd/modes.js";
 import { freshRandom, type Random } from "../crowd/random.js";
 import type { Room } from "../rooms/Room.js";
 import type { Minigame } from "./Minigame.js";
@@ -91,8 +98,8 @@ function winnerIdOf(match: CrowdMatch): string {
 
 function winningPlayerIds(match: CrowdMatch): Set<string> {
   const result = match.result!;
-  if (result.winner === "hunters") {
-    return new Set([...match.slots.values()].filter((slot) => slot.role === "hunter").map((slot) => slot.playerId));
+  if (result.winnerRole) {
+    return new Set([...match.slots.values()].filter((slot) => slot.role === result.winnerRole).map((slot) => slot.playerId));
   }
   return new Set(result.winnerPlayerId ? [result.winnerPlayerId] : []);
 }
@@ -103,3 +110,7 @@ function isCrowdInput(input: unknown): input is CrowdInput {
 
 export const crowdActNatural = createCrowdMinigame("crowd_act_natural", "Act Natural", actNaturalRules);
 export const crowdSilentWitness = createCrowdMinigame("crowd_silent_witness", "Silent Witness", silentWitnessRules);
+export const crowdLanternFestival = createCrowdMinigame("crowd_lantern_festival", "Lantern Festival", lanternFestivalRules);
+export const crowdBellRingers = createCrowdMinigame("crowd_bell_ringers", "Bell Ringers", bellRingersRules);
+export const crowdHeistHour = createCrowdMinigame("crowd_heist_hour", "Heist Hour", heistHourRules);
+export const crowdMarked = createCrowdMinigame("crowd_marked", "Marked", markedRules);

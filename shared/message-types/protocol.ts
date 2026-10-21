@@ -1,3 +1,5 @@
+import type { CrowdInput, CrowdView } from "../crowd/protocol.js";
+
 export const MESSAGE_TYPES = {
   CREATE_ROOM: "CREATE_ROOM",
   JOIN_ROOM: "JOIN_ROOM",
@@ -43,6 +45,7 @@ export type GameSnapshot = {
   lootAndLeave?: LootAndLeaveState;
   silentWitness?: SilentWitnessState;
   luckySeven?: LuckySevenState;
+  crowd?: CrowdView;
 };
 
 export type Vector2Payload = {
@@ -322,7 +325,13 @@ export type LootAndLeaveInput = {
   sequence?: number;
 };
 
-export type PlayerInputPayload = "PRESS" | ActNaturalInput | LootAndLeaveInput | SilentWitnessInput | LuckySevenInput;
+export type PlayerInputPayload =
+  | "PRESS"
+  | ActNaturalInput
+  | LootAndLeaveInput
+  | SilentWitnessInput
+  | LuckySevenInput
+  | CrowdInput;
 
 export type ClientMessage =
   | { type: "CREATE_ROOM"; displayName: string }

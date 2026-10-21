@@ -16,9 +16,10 @@ The current scaffold proves the core platform loop:
 ## Structure
 
 ```text
-client-godot/   Godot 4 client project, scenes, scripts, and assets
+client-web/     Browser client (TypeScript + Vite) for the crowd games
+client-godot/   Godot 4 client project for the other minigames
 server/         Node.js + TypeScript WebSocket server
-shared/         Message types and constants shared by server/client-facing docs
+shared/         Message types, constants and crowd movement rules shared by server and clients
 docs/           Architecture and local setup notes
 ```
 
@@ -41,7 +42,13 @@ npm install
 npm run dev
 ```
 
-Then open `client-godot/` in Godot 4 and run the project.
+Then, in a second terminal, start the browser client and open http://localhost:5173 in two tabs:
+
+```bash
+npm run web
+```
+
+The Godot client (`client-godot/`) still runs Loot & Leave and Lucky Seven.
 
 Production server check:
 

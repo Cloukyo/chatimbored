@@ -6,9 +6,10 @@
 
 ## Folder Structure
 
-- `client-godot/`: Godot 4 client project. Godot should open this folder only.
+- `client-web/`: Browser client (TypeScript, Vite, Canvas 2D) for the crowd games: Act Natural and Silent Witness.
+- `client-godot/`: Godot 4 client project for the other minigames. Godot should open this folder only.
 - `server/`: Node.js and TypeScript WebSocket server.
-- `shared/`: Shared message/type definitions and constants.
+- `shared/`: Shared message/type definitions and constants. `shared/crowd/` holds the crowd protocol and the movement rules that the server and client prediction both run.
 - `docs/`: Architecture and setup documentation.
 
 Codex and VS Code should open the repo root, not only the Godot folder.
@@ -19,6 +20,11 @@ Codex and VS Code should open the repo root, not only the Godot folder.
 - The client may request actions but must not decide winners or final scores.
 - Validate all incoming client messages before mutating room state.
 - Keep rooms in memory for this prototype. Do not add accounts, database persistence, matchmaking, payments, chat, analytics, cosmetics, or a board wrapper yet.
+
+## Crowd Games
+
+- Crowd games run on `server/src/crowd/CrowdMatch.ts`; each mode is a `CrowdRules` object in `server/src/crowd/modes.ts`.
+- Clients must never be able to tell players from NPCs. Send per-player views (`snapshotFor`), keep hidden state off `room.game`, give players and NPCs the same speeds, directions and look, and never send another player's id or role during a round.
 
 ## Minigame Module Rules
 

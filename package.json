@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "server"
+    "server",
+    "client-web"
   ],
   "engines": {
     "node": ">=20"
@@ -14,6 +15,8 @@
     "build": "npm --workspace server run build",
     "test": "npm --workspace server run test",
     "vercel-build": "node scripts/check-vercel-godot-build.mjs",
-    "start": "npm --workspace server run start"
+    "start": "npm --workspace server run start",
+    "web": "npm --workspace client-web run dev",
+    "build:web": "npm --workspace client-web run build"
   }
 }

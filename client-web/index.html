@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>chatImbored</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <main id="app">
+      <section id="landing" class="screen card">
+        <h1>chatImbored</h1>
+        <p class="muted">Blend into the crowd. Spot your friends before they spot you.</p>
+        <label>Your name <input id="name" maxlength="24" autocomplete="nickname" placeholder="Display name" /></label>
+        <button id="create" class="primary">Create room</button>
+        <div class="row">
+          <input id="code" maxlength="5" placeholder="Room code" autocapitalize="characters" />
+          <button id="join">Join</button>
+        </div>
+        <p id="landing-status" class="status" role="status"></p>
+      </section>
+
+      <section id="lobby" class="screen card wide" hidden>
+        <header class="row spread">
+          <h2>Room <span id="room-code"></span></h2>
+          <div class="row">
+            <button id="copy-link">Copy invite link</button>
+            <button id="leave" class="ghost">Leave</button>
+          </div>
+        </header>
+        <ul id="players" class="players"></ul>
+        <h3>Game</h3>
+        <div id="modes" class="modes"></div>
+        <div class="row">
+          <button id="ready">Ready</button>
+          <button id="start" class="primary">Start</button>
+        </div>
+        <p id="lobby-status" class="status" role="status"></p>
+      </section>
+
+      <section id="game" class="screen game" hidden>
+        <canvas id="arena"></canvas>
+        <div id="hud" class="hud"></div>
+        <div id="results" class="results card" hidden>
+          <h2 id="results-title"></h2>
+          <ul id="reveal" class="players"></ul>
+          <button id="back-to-lobby" class="primary">Back to lobby</button>
+          <p id="results-wait" class="muted">Waiting for the host to head back to the lobby.</p>
+        </div>
+      </section>
+    </main>
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

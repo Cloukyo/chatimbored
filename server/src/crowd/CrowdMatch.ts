@@ -1,0 +1,329 @@
+import {
+  CROWD_STATE,
+  type CrowdEntityState,
+  type CrowdEvent,
+  type CrowdInput,
+  type CrowdModeId,
+  type CrowdResult,
+  type CrowdRole,
+  type CrowdVector,
+  type CrowdView,
+} from "../../../shared/crowd/protocol.js";
+import { CROWD_TICK_MS, type CrowdArena, facingOf, snapDirection, stepPosition } from "../../../shared/crowd/movement.js";
+import { type Random, shuffle } from "./random.js";
+
+const MAX_QUEUED_INPUTS = 4;
+const EVENT_WINDOW_TICKS = 40;
+const ENTITY_RADIUS = 14;
+
+export type CrowdEntity = {
+  id: number;
+  x: number;
+  y: number;
+  facing: number;
+  direction: CrowdVector;
+  running: boolean;
+  dead: boolean;
+  sickMs: number;
+  // NPC brain; players have none unless they leave mid-round.
+  brain?: { timerMs: number };
+};
+
+export type CrowdSlot = {
+  playerId: string;
+  entity: CrowdEntity;
+  role: CrowdRole;
+  shots: number;
+  actCooldownMs: number;
+  queue: CrowdInput[];
+  lastDirection: CrowdVector;
+  lastRun: boolean;
+  ack: number;
+  connected: boolean;
+};
+
+export type CrowdRules = {
+  mode: CrowdModeId;
+  arena: CrowdArena;
+  npcCount: number;
+  canRun: boolean;
+  assignRoles(playerIds: string[], random: Random): Map<string, CrowdRole>;
+  shotsFor(role: CrowdRole): number;
+  spawnPoint(random: Random, arena: CrowdArena): CrowdVector;
+  // Picks the next thing an NPC does: a direction to walk, or stand still for a while.
+  npcPlan(entity: CrowdEntity, random: Random, arena: CrowdArena): { direction: CrowdVector; durationMs: number };
+  onAct?(match: CrowdMatch, slot: CrowdSlot): void;
+  onShotHit(match: CrowdMatch, shooter: CrowdSlot, target: CrowdEntity): void;
+  onEntityDied?(match: CrowdMatch, entity: CrowdEntity, cause: "shot" | "sick"): void;
+  onTick(match: CrowdMatch): void;
+  onPlayerLeft?(match: CrowdMatch, slot: CrowdSlot): void;
+  onTimeout(match: CrowdMatch): CrowdResult;
+  hud?(match: CrowdMatch): CrowdView["hud"];
+};
+
+type StoredEvent = { tick: number; event: CrowdEvent };
+
+export class CrowdMatch {
+  readonly entities: CrowdEntity[] = [];
+  readonly slots = new Map<string, CrowdSlot>();
+  readonly random: Random;
+  tick = 0;
+  result?: CrowdResult;
+  private readonly events: StoredEvent[] = [];
+  private nextEventId = 1;
+  private packedTick = -1;
+  private packed: number[] = [];
+
+  constructor(
+    readonly rules: CrowdRules,
+    playerIds: string[],
+    random: Random,
+  ) {
+    this.random = random;
+    const total = rules.npcCount + playerIds.length;
+    const ids = shuffle(
+      Array.from({ length: total }, (_unused, index) => index + 1),
+      random,
+    );
+    const roles = rules.assignRoles(playerIds, random);
+
+    for (let index = 0; index < total; index += 1) {
+      const spawn = rules.spawnPoint(random, rules.arena);
+      const entity: CrowdEntity = {
+        id: ids[index],
+        x: spawn.x,
+        y: spawn.y,
+        facing: Math.floor(random() * 8),
+        direction: { x: 0, y: 0 },
+        running: false,
+        dead: false,
+        sickMs: 0,
+      };
+      this.entities.push(entity);
+      const playerId = playerIds[index - rules.npcCount];
+      if (index < rules.npcCount || playerId === undefined) {
+        entity.brain = { timerMs: random() * 1200 };
+        continue;
+      }
+      const role = roles.get(playerId) ?? "runner";
+      this.slots.set(playerId, {
+        playerId,
+        entity,
+        role,
+        shots: rules.shotsFor(role),
+        actCooldownMs: 0,
+        queue: [],
+        lastDirection: { x: 0, y: 0 },
+        lastRun: false,
+        ack: 0,
+        connected: true,
+      });
+    }
+  }
+
+  get arena(): CrowdArena {
+    return this.rules.arena;
+  }
+
+  queueInput(playerId: string, input: CrowdInput): void {
+    const slot = this.slots.get(playerId);
+    if (!slot || input.seq <= slot.ack || slot.queue.some((queued) => queued.seq === input.seq)) return;
+    slot.queue.push(input);
+    // Keep latency bounded if a client bursts inputs after a stall; the newest inputs win.
+    while (slot.queue.length > MAX_QUEUED_INPUTS) {
+      const dropped = slot.queue.shift()!;
+      slot.ack = Math.max(slot.ack, dropped.seq);
+    }
+  }
+
+  step(): void {
+    if (this.result) return;
+    this.tick += 1;
+
+    for (const slot of this.slots.values()) {
+      slot.actCooldownMs = Math.max(0, slot.actCooldownMs - CROWD_TICK_MS);
+      const input = slot.queue.shift();
+      if (input) {
+        slot.ack = input.seq;
+        slot.lastDirection = snapDirection(input.move);
+        slot.lastRun = input.run && this.rules.canRun;
+      }
+      const entity = slot.entity;
+      if (entity.dead || entity.brain) continue;
+      if (entity.sickMs > 0) {
+        entity.direction = { x: 0, y: 0 };
+        entity.running = false;
+        continue;
+      }
+      entity.direction = slot.lastDirection;
+      entity.running = slot.lastRun && (slot.lastDirection.x !== 0 || slot.lastDirection.y !== 0);
+      this.move(entity);
+      if (!input) continue;
+      if (input.shoot && slot.shots > 0) this.shoot(slot, input.shoot);
+      if (this.result) return;
+      if (input.act && slot.actCooldownMs <= 0) this.rules.onAct?.(this, slot);
+    }
+
+    for (const entity of this.entities) {
+      if (entity.dead) continue;
+      if (entity.sickMs > 0) {
+        entity.sickMs = Math.max(0, entity.sickMs - CROWD_TICK_MS);
+        if (entity.sickMs === 0) this.kill(entity, "sick");
+        continue;
+      }
+      if (!entity.brain) continue;
+      entity.brain.timerMs -= CROWD_TICK_MS;
+      if (entity.brain.timerMs <= 0) {
+        const plan = this.rules.npcPlan(entity, this.random, this.arena);
+        entity.direction = plan.direction;
+        entity.brain.timerMs = plan.durationMs;
+      }
+      this.move(entity);
+    }
+
+    if (!this.result) this.rules.onTick(this);
+  }
+
+  timeout(): CrowdResult {
+    if (!this.result) this.result = this.rules.onTimeout(this);
+    return this.result;
+  }
+
+  end(result: Omit<CrowdResult, "reveal">): void {
+    if (this.result) return;
+    this.result = { ...result, reveal: [] };
+  }
+
+  removePlayer(playerId: string): void {
+    const slot = this.slots.get(playerId);
+    if (!slot || !slot.connected) return;
+    slot.connected = false;
+    slot.queue = [];
+    // A player who leaves keeps wandering as part of the crowd, so their body doesn't give anything away.
+    if (!slot.entity.dead) slot.entity.brain = { timerMs: 0 };
+    this.rules.onPlayerLeft?.(this, slot);
+  }
+
+  slotForEntity(entity: CrowdEntity): CrowdSlot | undefined {
+    for (const slot of this.slots.values()) if (slot.entity === entity) return slot;
+    return undefined;
+  }
+
+  livingSlots(): CrowdSlot[] {
+    return [...this.slots.values()].filter((slot) => !slot.entity.dead);
+  }
+
+  makeSick(entity: CrowdEntity, durationMs: number): void {
+    if (entity.dead || entity.sickMs > 0) return;
+    entity.sickMs = durationMs;
+    entity.direction = { x: 0, y: 0 };
+  }
+
+  kill(entity: CrowdEntity, cause: "shot" | "sick" = "shot"): void {
+    if (entity.dead) return;
+    entity.dead = true;
+    entity.sickMs = 0;
+    entity.direction = { x: 0, y: 0 };
+    entity.running = false;
+    this.emit({ type: "down", entity: entity.id });
+    this.rules.onEntityDied?.(this, entity, cause);
+  }
+
+  emit(event: DistributiveOmit<CrowdEvent, "id">): void {
+    this.events.push({ tick: this.tick, event: { ...event, id: this.nextEventId++ } as CrowdEvent });
+    while (this.events.length > 0 && this.events[0].tick < this.tick - EVENT_WINDOW_TICKS) this.events.shift();
+  }
+
+  viewFor(playerId: string): CrowdView | undefined {
+    const slot = this.slots.get(playerId);
+    if (!slot) return undefined;
+    return {
+      mode: this.rules.mode,
+      arena: this.arena,
+      tick: this.tick,
+      you: slot.entity.id,
+      ack: slot.ack,
+      role: slot.role,
+      alive: !slot.entity.dead,
+      shots: slot.shots,
+      canAct: slot.actCooldownMs <= 0 && slot.role === "killer",
+      canRun: this.rules.canRun,
+      e: this.packEntities(),
+      events: this.events.filter((stored) => stored.tick >= this.tick - EVENT_WINDOW_TICKS).map((stored) => stored.event),
+      hud: this.rules.hud?.(this) ?? {},
+      result: this.result ? { ...this.result, reveal: this.reveal() } : undefined,
+    };
+  }
+
+  private reveal(): CrowdResult["reveal"] {
+    return [...this.slots.values()].map((slot) => ({
+      entity: slot.entity.id,
+      playerId: slot.playerId,
+      role: slot.role,
+      alive: !slot.entity.dead,
+    }));
+  }
+
+  private packEntities(): number[] {
+    if (this.packedTick === this.tick) return this.packed;
+    // Sorted by id so the list order doesn't leak which entities were created as players.
+    const sorted = [...this.entities].sort((a, b) => a.id - b.id);
+    this.packed = sorted.flatMap((entity) => [entity.id, entity.x, entity.y, entity.facing, stateOf(entity)]);
+    this.packedTick = this.tick;
+    return this.packed;
+  }
+
+  private move(entity: CrowdEntity): void {
+    const next = stepPosition(entity, entity.direction, entity.running, this.arena);
+    entity.x = next.x;
+    entity.y = next.y;
+    entity.facing = facingOf(entity.direction, entity.facing);
+  }
+
+  private shoot(slot: CrowdSlot, target: CrowdVector): void {
+    slot.shots -= 1;
+    const from = { x: slot.entity.x, y: slot.entity.y };
+    const end = rayToEdge(from, target, this.arena);
+    let best: { entity: CrowdEntity; distance: number; point: CrowdVector } | undefined;
+    for (const entity of this.entities) {
+      if (entity === slot.entity || entity.dead) continue;
+      const hit = segmentHit(from, end, entity, ENTITY_RADIUS);
+      if (hit && (!best || hit.distance < best.distance)) best = { entity, ...hit };
+    }
+    this.emit({ type: "shot", from, to: best?.point ?? end });
+    if (best) this.rules.onShotHit(this, slot, best.entity);
+  }
+}
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+function stateOf(entity: CrowdEntity): CrowdEntityState {
+  if (entity.dead) return CROWD_STATE.DEAD;
+  if (entity.sickMs > 0) return CROWD_STATE.SICK;
+  if (entity.direction.x === 0 && entity.direction.y === 0) return CROWD_STATE.IDLE;
+  return entity.running ? CROWD_STATE.RUN : CROWD_STATE.WALK;
+}
+
+function rayToEdge(from: CrowdVector, toward: CrowdVector, arena: CrowdArena): CrowdVector {
+  const dx = toward.x - from.x;
+  const dy = toward.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (!Number.isFinite(length) || length < 0.001) return from;
+  const reach = Math.hypot(arena.width, arena.height);
+  return { x: from.x + (dx / length) * reach, y: from.y + (dy / length) * reach };
+}
+
+function segmentHit(
+  start: CrowdVector,
+  end: CrowdVector,
+  target: CrowdVector,
+  radius: number,
+): { distance: number; point: CrowdVector } | undefined {
+  const segment = { x: end.x - start.x, y: end.y - start.y };
+  const lengthSquared = segment.x * segment.x + segment.y * segment.y;
+  if (lengthSquared < 0.001) return undefined;
+  const t = Math.max(0, Math.min(1, ((target.x - start.x) * segment.x + (target.y - start.y) * segment.y) / lengthSquared));
+  const point = { x: start.x + segment.x * t, y: start.y + segment.y * t };
+  if (Math.hypot(target.x - point.x, target.y - point.y) > radius) return undefined;
+  return { distance: Math.hypot(point.x - start.x, point.y - start.y), point: { x: Math.round(point.x), y: Math.round(point.y) } };
+}

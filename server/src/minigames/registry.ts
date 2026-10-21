@@ -1,4 +1,5 @@
 import { buttonRace } from "./ButtonRace.js";
+import { crowdActNatural, crowdSilentWitness } from "./CrowdGames.js";
 import { actNatural } from "./ActNatural.js";
 import { lootAndLeave } from "./LootAndLeave.js";
 import { luckySeven } from "./LuckySeven.js";
@@ -25,3 +26,5 @@ registerMinigame(actNatural);
 registerMinigame(lootAndLeave);
 registerMinigame(silentWitness);
 registerMinigame(luckySeven);
+registerMinigame(crowdActNatural);
+registerMinigame(crowdSilentWitness);

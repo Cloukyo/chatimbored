@@ -1,0 +1,14 @@
+# Render Blueprint for the game server. Free plan: it sleeps when idle and wakes on the next visit.
+services:
+  - type: web
+    name: chatimbored
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"

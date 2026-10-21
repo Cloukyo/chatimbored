@@ -22,10 +22,10 @@ Also open the Godot project and test the affected minigames locally. Only merge 
 
 For deployed playtests, the Godot client should connect to a secure WebSocket URL that starts with `wss://`.
 
-Current Railway WebSocket URL:
+Current game server WebSocket URL (Render):
 
 ```text
-wss://chatimbored-production.up.railway.app
+wss://chatimbored.onrender.com
 ```
 
 ## Server: Local Production Check
@@ -108,13 +108,13 @@ ws://localhost:8787
 For a deployed Web build, open the game with a `server` query parameter:
 
 ```text
-https://your-vercel-site.vercel.app/?server=wss://chatimbored-production.up.railway.app
+https://your-vercel-site.vercel.app/?server=wss://chatimbored.onrender.com
 ```
 
 URL-encoded form, which is safer to paste into some dashboards:
 
 ```text
-https://your-vercel-site.vercel.app/?server=wss%3A%2F%2Fchatimbored-production.up.railway.app
+https://your-vercel-site.vercel.app/?server=wss%3A%2F%2Fchatimbored.onrender.com
 ```
 
 The client saves that server URL in browser local storage, so you usually only need the query parameter the first time. To switch servers later, open the page again with a different `?server=...` value.
@@ -156,17 +156,17 @@ Godot references:
 
 ## Deployed Testing Flow
 
-1. Deploy the Node server on Railway first.
+1. Deploy the Node server on Render first.
 2. Confirm the server health URL opens:
 
 ```text
-https://chatimbored-production.up.railway.app/health
+https://chatimbored.onrender.com/health
 ```
 
 3. Copy the server's secure WebSocket URL:
 
 ```text
-wss://chatimbored-production.up.railway.app
+wss://chatimbored.onrender.com
 ```
 
 4. Export the Godot Web client to `client-godot/builds/web/`.
@@ -174,7 +174,7 @@ wss://chatimbored-production.up.railway.app
 6. Open the static site with:
 
 ```text
-https://your-vercel-site.vercel.app/?server=wss://chatimbored-production.up.railway.app
+https://your-vercel-site.vercel.app/?server=wss://chatimbored.onrender.com
 ```
 
 7. Create a room.
@@ -195,27 +195,26 @@ https://your-vercel-site.vercel.app/?server=wss://chatimbored-production.up.rail
 - Refreshing one client does not crash the server.
 - The server logs do not show repeated errors during normal play.
 
-## Railway Server Settings
+## Render Server Settings
 
-Use these Railway settings:
+The server runs on Render's free plan, defined in `render.yaml` at the repo root. To set it up, open Render, choose New > Blueprint, and pick this repo. Render then builds from the repo root and redeploys on every push to `main`.
 
-- Branch: `main`
-- Root Directory: leave empty, or set it to the repo root. Do not set it to `server`.
-- Install command: `npm install`
-- Build command: `npm run build`
+- Build command: `npm install --include=dev && npm run build`
 - Start command: `npm start`
-- Node version: `20` or newer
-- Port: leave automatic; the server reads `process.env.PORT`
+- Health check: `/health`
+- Port: automatic; the server reads `process.env.PORT`
 
-Railway must build from the repo root because the server imports shared TypeScript files from the sibling `shared/` folder. If Railway's Root Directory is `server`, the build cannot see `shared/` and TypeScript will fail with missing module errors.
+It must build from the repo root because the server imports shared TypeScript files from the sibling `shared/` folder.
+
+The free plan sleeps after about 15 minutes idle and takes up to a minute to wake. The browser client pings `/health` on page load and keeps retrying its first connection while the server wakes, showing a "Waking up the game server" note. If Render gives the service a different hostname than `chatimbored.onrender.com`, update `PRODUCTION_SERVER_URL` in `client-web/src/net.ts`.
 
 Do not upload `client-godot/builds/web/` to the Node server host. It belongs on the static web host.
 
 ## Browser Client (crowd games)
 
-The crowd games run in `client-web/`. `npm run vercel-build` builds it into `client-godot/builds/web/play/`, so the existing Vercel site serves it at `/play/` next to the Godot build. No extra Vercel project is needed.
+The crowd games run in `client-web/`. `npm run vercel-build` builds it into `client-godot/builds/web/play/`, so the existing Vercel site serves it at `/play/` next to the Godot build, and the site root redirects there. The Godot build is still at `/index.html`. No extra Vercel project is needed.
 
-It connects to `wss://chatimbored-production.up.railway.app` by default. Override it with the `VITE_SERVER_URL` environment variable at build time, or `?server=wss://...` in the page URL. Invite links look like `https://your-site.vercel.app/play/?room=ABCDE`.
+It connects to `wss://chatimbored.onrender.com` by default. Override it with the `VITE_SERVER_URL` environment variable at build time, or `?server=wss://...` in the page URL. Invite links look like `https://your-site.vercel.app/play/?room=ABCDE`.
 
 ## Vercel Static Client Settings
 

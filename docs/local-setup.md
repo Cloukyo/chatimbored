@@ -65,6 +65,6 @@ Short version:
 1. Run `npm run build` and `npm start` from the repo root.
 2. Export Godot's `Web` preset to `client-godot/builds/web/index.html`.
 3. Host `client-godot/builds/web/` on Vercel or another static host.
-4. Open the hosted web client with `?server=wss://chatimbored-production.up.railway.app`.
+4. Open the hosted web client with `?server=wss://chatimbored.onrender.com`.
 
 For deployed browser testing, use secure WebSockets (`wss://`).

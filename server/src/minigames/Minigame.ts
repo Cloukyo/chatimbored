@@ -7,6 +7,8 @@ export type Minigame = {
   minPlayers: number;
   maxPlayers: number;
   tickMs?: number;
+  // Tick-driven games stream GAME_STATE from the tick loop only; inputs don't trigger extra broadcasts.
+  tickBroadcastOnly?: boolean;
   setup(room: Room): GameSnapshot;
   handleInput(room: Room, playerId: string | undefined, input: unknown): GameSnapshot;
   onPlayerLeft?(room: Room, playerId: string): GameSnapshot;

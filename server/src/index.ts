@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { MESSAGE_TYPES, type ServerMessage } from "../../shared/message-types/protocol.js";
 import { parseClientMessage } from "./messages/validation.js";
+import { getMinigame } from "./minigames/registry.js";
 import { RoomManager } from "./rooms/RoomManager.js";
 import type { Room } from "./rooms/Room.js";
 
@@ -50,7 +51,9 @@ wss.on("connection", (socket) => {
       }
 
       if (!playerId) throw new Error("Create or join a room first.");
-      const room = manager.handleRoomMessage(playerId, message, finishAndBroadcast, broadcastRoom);
+      const room = manager.handleRoomMessage(playerId, message, finishAndBroadcast, broadcastTick);
+      // Tick-driven games already stream state every tick; skip the per-input full broadcast.
+      if (message.type === MESSAGE_TYPES.PLAYER_INPUT && isTickBroadcastOnly(room)) return;
       broadcastRoom(room);
     } catch (error) {
       send(socket, { type: MESSAGE_TYPES.ERROR, message: error instanceof Error ? error.message : "Invalid message." });
@@ -78,6 +81,25 @@ function finishAndBroadcast(room: Room): void {
     if (socket) send(socket, { type: MESSAGE_TYPES.GAME_OVER, game, winnerId: game.winnerId });
   }
   broadcastRoom(room);
+}
+
+function isTickBroadcastOnly(room: Room): boolean {
+  return room.phase === "in_game" && getMinigame(room.selectedMinigameId)?.tickBroadcastOnly === true;
+}
+
+function broadcastTick(room: Room): void {
+  if (!isTickBroadcastOnly(room)) {
+    broadcastRoom(room);
+    return;
+  }
+  // Room membership and phase don't change on a tick, so only the game state is sent.
+  const game = room.snapshot().game;
+  if (!game) return;
+  const payload = JSON.stringify({ type: MESSAGE_TYPES.GAME_STATE, game } satisfies ServerMessage);
+  for (const player of room.players) {
+    const socket = sockets.get(player.id);
+    if (socket && socket.readyState === socket.OPEN) socket.send(payload);
+  }
 }
 
 function broadcastRoom(room?: Room): void {

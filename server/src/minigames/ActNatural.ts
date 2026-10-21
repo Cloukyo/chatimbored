@@ -32,8 +32,10 @@ export const actNatural: Minigame = {
   name: "Act Natural",
   minPlayers: 2,
   maxPlayers: 8,
+  tickBroadcastOnly: true,
 
   setup(room: Room): GameSnapshot {
+    room.players.forEach((player) => playerMovement.delete(player.id));
     return {
       minigameId: this.id,
       name: this.name,
@@ -114,6 +116,7 @@ export const actNatural: Minigame = {
   finish(room: Room): GameSnapshot {
     if (!room.game?.actNatural) throw new Error("No Act Natural round is running.");
     if (!room.game.winnerId) room.game.winnerId = closestLivingPlayer(room.game.actNatural.players);
+    room.game.actNatural.players.forEach((player) => playerMovement.delete(player.id));
 
     room.players.forEach((player) => {
       player.score = player.id === room.game?.winnerId ? 1 : 0;
@@ -123,6 +126,7 @@ export const actNatural: Minigame = {
   },
 };
 
+// Keyed by player id (UUIDs, unique across rooms); cleared per player at setup and finish.
 const playerMovement = new Map<string, Vector2Payload>();
 
 function createNpcs(): ActNaturalNpcState[] {

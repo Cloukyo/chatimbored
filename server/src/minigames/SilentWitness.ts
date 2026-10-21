@@ -21,6 +21,7 @@ import type {
   SilentWitnessState,
   Vector2Payload,
 } from "../../../shared/message-types/protocol.js";
+import { randomInt } from "node:crypto";
 import type { Room } from "../rooms/Room.js";
 import type { Minigame } from "./Minigame.js";
 
@@ -33,6 +34,7 @@ const MAX_X = SILENT_WITNESS_ARENA_WIDTH - 40;
 const MIN_Y = 50;
 const MAX_Y = SILENT_WITNESS_ARENA_HEIGHT - 50;
 
+// Keyed by player id (UUIDs, unique across rooms); cleared per player at setup and finish.
 const playerMovement = new Map<string, Vector2Payload>();
 const roundElapsedMs = new Map<string, number>();
 
@@ -42,9 +44,10 @@ export const silentWitness: Minigame = {
   minPlayers: 2,
   maxPlayers: 8,
   tickMs: SILENT_WITNESS_TICK_MS,
+  tickBroadcastOnly: true,
 
   setup(room: Room): GameSnapshot {
-    playerMovement.clear();
+    room.players.forEach((player) => playerMovement.delete(player.id));
     roundElapsedMs.set(room.code, 0);
     const killerId = chooseKiller(room);
     return {
@@ -153,6 +156,7 @@ export const silentWitness: Minigame = {
   finish(room: Room): GameSnapshot {
     if (!room.game?.silentWitness) throw new Error("No Silent Witness round is running.");
     roundElapsedMs.delete(room.code);
+    room.game.silentWitness.players.forEach((player) => playerMovement.delete(player.id));
     const state = room.game.silentWitness;
     if (!state.result) {
       state.result = state.publicKillCount >= state.killTarget ? "killer" : "hunters";
@@ -168,8 +172,7 @@ export const silentWitness: Minigame = {
 };
 
 function chooseKiller(room: Room): string {
-  const seed = room.code.split("").reduce((sum, char) => sum + char.charCodeAt(0), room.players.length * 17);
-  return room.players[seed % room.players.length].id;
+  return room.players[randomInt(room.players.length)].id;
 }
 
 function createNpcs(): SilentWitnessNpcState[] {

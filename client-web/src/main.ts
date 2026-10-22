@@ -119,6 +119,13 @@ const connection = new Connection(
   () => ($("landing-status").textContent = "Waking up the game server. This can take up to a minute the first time."),
 );
 
+// How to play ---------------------------------------------------------------
+
+const help = $<HTMLDialogElement>("help");
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-help]")) button.addEventListener("click", () => help.showModal());
+$("help-close").addEventListener("click", () => help.close());
+help.addEventListener("click", (event) => event.target === help && help.close());
+
 // Sound -------------------------------------------------------------------
 
 const musicVolume = $<HTMLInputElement>("music-volume");
@@ -559,6 +566,7 @@ window.addEventListener("gamepadconnected", () => room?.phase === "lobby" && ren
 window.addEventListener("gamepaddisconnected", () => room?.phase === "lobby" && renderLobby());
 
 function onPadMenu(pad: number, edges: Set<number>): void {
+  if (!$("round-intro").hidden) hideRoundIntro();
   if (!room) return;
   const mine = mySource.kind === "pad" && mySource.index === pad;
   const seat = couchSeats.find((candidate) => candidate.pad === pad);
@@ -1015,24 +1023,53 @@ function showRoundIntro(): void {
   const intro = $("round-intro");
   window.clearTimeout(introTimer);
   intro.hidden = true;
-  if (!night) return;
-  const finale = !night.current && Boolean(night.finalists);
-  const mansionRoom = night.current ? MANSION_ROOMS.find((candidate) => candidate.key === night.current) : undefined;
+  if (!room) return;
+  const finale = Boolean(night && !night.current && night.finalists);
+  const mansionRoom = MANSION_ROOMS.find((candidate) => candidate.key === night?.current)
+    ?? (night ? undefined : MANSION_ROOMS.find((candidate) => candidate.minigameId === room!.selectedMinigameId));
   if (!finale && !mansionRoom) return;
   const mode = MODES.find((candidate) => candidate.id === mansionRoom?.minigameId);
   $("intro-icon").innerHTML = roomIcon(finale ? "ballroom" : mansionRoom!.key);
-  $("intro-round").textContent = finale ? "The final dance" : `Round ${night.roundsPlayed + 1} of ${night.totalRounds}`;
+  $("intro-round").textContent = finale ? "The final dance" : night ? `Round ${night.roundsPlayed + 1} of ${night.totalRounds}` : "Quick play";
   $("intro-room").textContent = finale ? "The Ballroom" : mansionRoom!.name;
-  $("intro-mode").textContent = finale ? `${night.finalists!.map(nameOf).join(" vs ")}` : (mode?.name ?? "");
+  $("intro-mode").textContent = finale ? `${night!.finalists!.map(nameOf).join(" vs ")}` : (mode?.name ?? "");
   $("intro-blurb").textContent = finale
     ? "Hit the other finalist to win the night. Everyone else steers a guest."
     : (mode?.blurb ?? "");
+  $("intro-controls").textContent = controlsLine();
+  // The first time someone meets a room the card stays up longer; any key, click or button dismisses it.
+  const key = finale ? "ballroom" : mansionRoom!.key;
+  const firstTime = !seenRooms().includes(key);
+  if (firstTime) markRoomSeen(key);
+  intro.classList.toggle("first", firstTime);
   intro.hidden = false;
   intro.classList.remove("leaving");
-  introTimer = window.setTimeout(() => {
-    intro.classList.add("leaving");
-    introTimer = window.setTimeout(() => (intro.hidden = true), 400);
-  }, 3200);
+  introTimer = window.setTimeout(hideRoundIntro, firstTime ? 8000 : 3200);
+}
+
+function hideRoundIntro(): void {
+  const intro = $("round-intro");
+  if (intro.hidden || intro.classList.contains("leaving")) return;
+  window.clearTimeout(introTimer);
+  intro.classList.add("leaving");
+  introTimer = window.setTimeout(() => (intro.hidden = true), 400);
+}
+
+for (const type of ["keydown", "pointerdown"]) window.addEventListener(type, () => !$("round-intro").hidden && hideRoundIntro());
+
+function controlsLine(): string {
+  if (window.matchMedia("(pointer: coarse)").matches && !sharedScreen()) return "Stick to move · Act button to act · Tap the crowd to shoot · Hold Run to run";
+  if (mySource.kind === "pad" || sharedScreen()) return "Stick to move · A acts · X shoots · RB runs";
+  return "WASD or arrows to move · E acts · Click shoots · Shift runs";
+}
+
+const SEEN_KEY = "morbid-masquerade:seen-rooms";
+function seenRooms(): string[] {
+  return (readStored(SEEN_KEY) ?? "").split(",").filter(Boolean);
+}
+
+function markRoomSeen(key: string): void {
+  writeStored(SEEN_KEY, [...seenRooms(), key].join(","));
 }
 
 function stopGame(): void {

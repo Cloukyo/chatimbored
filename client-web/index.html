@@ -25,6 +25,7 @@
           <input id="code" maxlength="5" placeholder="Room code" autocapitalize="characters" />
           <button id="join">Join</button>
         </div>
+        <button class="ghost" data-help>How to play</button>
         <p id="landing-status" class="status" role="status"></p>
       </section>
 
@@ -32,6 +33,7 @@
         <header class="row spread">
           <h2>Room <span id="room-code"></span></h2>
           <div class="row">
+            <button class="ghost" data-help>How to play</button>
             <button id="copy-link">Copy invite link</button>
             <button id="leave" class="ghost">Leave</button>
           </div>
@@ -112,6 +114,8 @@
           <h2 id="intro-room"></h2>
           <p id="intro-mode" class="intro-mode"></p>
           <p id="intro-blurb" class="muted"></p>
+          <p id="intro-controls" class="intro-controls"></p>
+          <p class="intro-dismiss">Press any key or tap to start</p>
         </div>
         <div id="results" class="results card" hidden>
           <h2 id="results-title"></h2>
@@ -122,6 +126,29 @@
         </div>
       </section>
     </main>
+    <dialog id="help" class="help card wide">
+      <header class="row spread">
+        <h2>How to play</h2>
+        <button id="help-close" class="ghost" aria-label="Close">Close</button>
+      </header>
+      <p>Everyone at the masquerade looks alike. Some of the guests are your friends, and the rest are the crowd. Move like the crowd so nobody spots you, and watch for anyone who doesn't.</p>
+      <h3>Controls</h3>
+      <table class="controls">
+        <thead><tr><th></th><th>Keyboard and mouse</th><th>Controller</th><th>Phone</th></tr></thead>
+        <tbody>
+          <tr><th>Move</th><td>WASD or arrows</td><td>Left stick or d-pad</td><td>Thumb stick</td></tr>
+          <tr><th>Act</th><td>E or Space</td><td>A</td><td>Act button</td></tr>
+          <tr><th>Shoot</th><td>Click</td><td>X or RT, along the right stick</td><td>Tap the crowd</td></tr>
+          <tr><th>Run</th><td>Shift</td><td>RB or B</td><td>Hold Run</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Running and shooting both get noticed. Guests stroll, pause and turn, and the safest player does the same.</p>
+      <h3>Party Night</h3>
+      <p>A night at the mansion: each room is a different game. Points come from winning, takedowns and surviving. Whoever is in last place picks the next room, and each round's winner claims the room they won. Between rounds, spend tips in the shop. The top two face off in the Last Dance.</p>
+      <h3>Playing on one screen</h3>
+      <p>Plug in a controller for each extra player and press A on it in the lobby. Nobody is marked on a shared screen, so your role and secrets come through your controller's rumble: one long buzz means you have the special role.</p>
+      <p class="muted">Lost your connection? Reopen the page in the same tab within a minute and a half to take your seat back.</p>
+    </dialog>
     <div id="toast" class="toast" hidden></div>
     <div class="sound-box">
       <button id="sound-toggle" class="ghost round" aria-label="Sound settings" aria-expanded="false">

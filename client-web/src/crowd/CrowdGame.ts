@@ -23,6 +23,7 @@ import {
   paintFloor,
   toWorld,
 } from "./draw.js";
+import { HOST_TRICKS } from "../../../shared/party/night.js";
 import { CUES, PAD, PadEdges, padAim, padMove, pressed, readPad, rumble } from "../input/pads.js";
 
 // Others are drawn this far in the past so there are always two snapshots to blend between.
@@ -46,7 +47,10 @@ const MODE_TITLES: Record<CrowdView["mode"], string> = {
   freeze_frame: "Freeze Frame",
   hot_parcel: "Hot Parcel",
   closing_time: "Closing Time",
+  last_dance: "The Last Dance",
 };
+
+const TRICK_NAMES: Record<string, string> = Object.fromEntries(HOST_TRICKS.map((trick) => [trick.key, trick.name]));
 
 type Snapshot = { time: number; figures: Map<number, Figure> };
 type Pending = { seq: number; direction: CrowdVector; run: boolean };
@@ -66,7 +70,7 @@ const KEYS = {
 // How far ahead of a controller player their shot is aimed, along the stick or the way they face.
 const PAD_SHOT_REACH = 400;
 const PAD_CURSOR_SPEED = 900;
-const PULSE_MS = { holding: 1000, holdingLate: 500, dark: 450 };
+const PULSE_MS = { holding: 1000, holdingLate: 500, dark: 450, invite: 3000 };
 
 export type PlayerNames = (playerId: string) => string;
 
@@ -91,6 +95,7 @@ type SeatState = {
   mineCount: number;
   alive: boolean;
   lastPulse: number;
+  lastInvitePulse: number;
 };
 
 const CONTROLS = {
@@ -126,7 +131,7 @@ export class CrowdGame {
     private readonly nameOf: PlayerNames,
     private readonly shared = false,
   ) {
-    this.seats = seats.map((seat) => ({ seat, seq: 0, pendingAct: false, cued: false, mineCount: 0, alive: true, lastPulse: 0 }));
+    this.seats = seats.map((seat) => ({ seat, seq: 0, pendingAct: false, cued: false, mineCount: 0, alive: true, lastPulse: 0, lastInvitePulse: 0 }));
     const signal = this.abort.signal;
     window.addEventListener("keydown", (event) => this.onKey(event, true), { signal });
     window.addEventListener("keyup", (event) => this.onKey(event, false), { signal });
@@ -204,6 +209,10 @@ export class CrowdGame {
     state.alive = view.alive;
     if (view.mine.length > state.mineCount) rumble(source.index, CUES.tick);
     state.mineCount = view.mine.length;
+    if (view.party?.holdingInvite && now - state.lastInvitePulse >= PULSE_MS.invite) {
+      state.lastInvitePulse = now;
+      rumble(source.index, CUES.invite);
+    }
     if (!view.alive) return;
     if (view.hud.holding) {
       const every = (view.hud.fuseSeconds ?? 10) <= 3 ? PULSE_MS.holdingLate : PULSE_MS.holding;
@@ -240,7 +249,8 @@ export class CrowdGame {
     const source = state.seat.source;
     const pad = source.kind === "pad" ? readPad(source.index) : undefined;
     const edges = pad ? this.padEdges.poll(pad) : new Set<number>();
-    if (!view || view.result || !view.alive) {
+    // A ghost keeps steering its guest after going down.
+    if (!view || view.result || !(view.alive || view.ghost)) {
       state.pendingShot = undefined;
       state.pendingAct = false;
       return;
@@ -252,8 +262,8 @@ export class CrowdGame {
       move = padMove(pad);
       run = pressed(pad, PAD.RB) || pressed(pad, PAD.B);
       if (edges.has(PAD.A)) state.pendingAct = true;
-      if (view.role === "lookout") this.moveCursor(state, view, pad);
-      if ((edges.has(PAD.X) || edges.has(PAD.RT)) && view.shots > 0) state.pendingShot = this.padShotTarget(state, view, pad);
+      if (aimsFromAbove(view)) this.moveCursor(state, view, pad);
+      if ((edges.has(PAD.X) || edges.has(PAD.RT)) && canShoot(view)) state.pendingShot = this.padShotTarget(state, view, pad);
     } else {
       move = {
         x: (this.held(KEYS.right) ? 1 : 0) - (this.held(KEYS.left) ? 1 : 0),
@@ -261,11 +271,11 @@ export class CrowdGame {
       };
       run = this.held(KEYS.run);
     }
-    run = run && view.canRun;
+    run = run && view.canRun && !view.ghost;
 
     state.seq += 1;
     const input: CrowdInput = { kind: "crowd", seq: state.seq, move, run, act: state.pendingAct };
-    if (state.pendingShot && view.shots > 0) input.shoot = roundPoint(state.pendingShot);
+    if (state.pendingShot && canShoot(view)) input.shoot = roundPoint(state.pendingShot);
     state.pendingShot = undefined;
     state.pendingAct = false;
     state.seat.send(input);
@@ -301,7 +311,7 @@ export class CrowdGame {
 
   // Controller shots fly along the right stick, or the way the figure faces if the stick is idle.
   private padShotTarget(state: SeatState, view: CrowdView, pad: Gamepad): CrowdVector | undefined {
-    if (view.role === "lookout") return state.cursor;
+    if (aimsFromAbove(view)) return state.cursor;
     const self = this.latestFigure(view.you);
     if (!self) return undefined;
     const from = !this.shared && this.predicted ? this.predicted.to : self;
@@ -369,14 +379,40 @@ export class CrowdGame {
   private updateHud(): void {
     const view = this.view;
     if (!view) return;
-    const lines = this.shared ? sharedHudLines(view) : this.hudLines(view);
+    const lines = this.shared ? [...sharedHudLines(view), ...this.sharedPartyLines()] : [...this.hudLines(view), ...this.partyLines(view)];
     const parts = [`<span data-timer></span>`, `<b>${MODE_TITLES[view.mode]}</b>`, ...lines];
-    if (!this.shared && !view.alive) parts.push("You're down");
+    if (!this.shared && view.ghost) parts.push("You're a ghost: steer your guest");
+    else if (!this.shared && !view.alive) parts.push("You're down");
     this.hud.innerHTML = parts.join(" · ");
+  }
+
+  // Party Night extras, for a screen with one player on it.
+  private partyLines(view: CrowdView): string[] {
+    const party = view.party;
+    if (!party) return [];
+    const keys = CONTROLS[this.seats[0].seat.source.kind];
+    const lines: string[] = [];
+    if (view.role === "host") lines.push(...hostLines(party, keys));
+    if (party.contract) lines.push(`Contract: ${escapeHtml(party.contract)}${party.contractDone ? " ✓" : ""}`);
+    if (party.holdingInvite) lines.push("<b>You hold the cursed invite</b>, bump a player to pass it");
+    if (party.nemesisName) lines.push(`Nemesis: <b>${escapeHtml(party.nemesisName)}</b> (double points)`);
+    if (party.wanted) lines.push(`Wanted: the leader is ${escapeHtml(party.wanted)}`);
+    return lines;
+  }
+
+  // On a shared screen only public things show: the Wanted hint and the host's tricks (everyone knows who hosts).
+  private sharedPartyLines(): string[] {
+    const lines: string[] = [];
+    const wanted = this.seats.find((state) => state.view?.party?.wanted)?.view?.party?.wanted;
+    if (wanted) lines.push(`Wanted: the leader is ${escapeHtml(wanted)}`);
+    const host = this.seats.find((state) => state.view?.role === "host");
+    if (host?.view?.party) lines.push(...hostLines(host.view.party, CONTROLS[host.seat.source.kind]));
+    return lines;
   }
 
   private hudLines(view: CrowdView): string[] {
     const keys = CONTROLS[this.seats[0].seat.source.kind];
+    if (view.role === "host") return [];
     const progress = `${view.hud.progress ?? 0}/${view.hud.goal ?? 0}`;
     const shot = (aim: string) => (view.shots > 0 ? `${keys.shoot} to shoot ${aim} (${view.shots} left)` : "Out of shots");
     switch (view.mode) {
@@ -415,6 +451,10 @@ export class CrowdGame {
           `${keys.act} strikes anyone close`,
           "Last one standing wins",
         ];
+      case "last_dance":
+        return view.role === "backer"
+          ? ["You're backing a finalist", "Steer your guest to get in the way"]
+          : ["Hit the other finalist to win the night", shot("them"), "A miss makes nearby guests flinch", "The floor is shrinking"];
     }
   }
 
@@ -491,19 +531,32 @@ export class CrowdGame {
         drawNameTag(ctx, figure, label, color);
       }
     } else {
-      if (self) drawNameTag(ctx, self, "You", "#e0a64a");
+      if (self) drawNameTag(ctx, self, view.ghost ? "Your ghost" : "You", "#e0a64a");
+      if (!this.shared) this.drawPartyTags(ctx, view, figures);
       this.drawCrosshairs(ctx);
     }
     ctx.restore();
   }
 
-  // Lookouts aim from above, so their crosshairs are the only thing of theirs on screen.
+  // A bought glimpse, or the host's overhead view of where the players are. Never on a shared screen.
+  private drawPartyTags(ctx: CanvasRenderingContext2D, view: CrowdView, figures: Map<number, Figure>): void {
+    const party = view.party;
+    if (!party) return;
+    const glimpse = party.glimpse !== undefined ? figures.get(party.glimpse) : undefined;
+    if (glimpse) drawNameTag(ctx, glimpse, "A player", "#6ba3e9");
+    for (const id of party.players ?? []) {
+      const figure = figures.get(id);
+      if (figure) drawNameTag(ctx, figure, "Player", "#e8d26a");
+    }
+  }
+
+  // Lookouts and the host aim from above, so their crosshairs are the only thing of theirs on screen.
   private drawCrosshairs(ctx: CanvasRenderingContext2D): void {
     for (const state of this.seats) {
       const view = state.view;
-      if (view?.role !== "lookout") continue;
+      if (!view || !aimsFromAbove(view)) continue;
       const at = state.seat.source.kind === "keyboard" ? this.pointer : state.cursor;
-      if (at) drawCrosshair(ctx, at, view.shots > 0);
+      if (at) drawCrosshair(ctx, at, canShoot(view));
     }
   }
 
@@ -559,7 +612,27 @@ function sharedHudLines(view: CrowdView): string[] {
       return ["Stay in the light", "A buzz means you're in the dark", controls];
     case "marked":
       return ["Marked needs a private screen for each player", controls];
+    case "last_dance":
+      return ["The finalists hit each other to win the night", "Everyone else steers a guest as a ghost", controls];
   }
+}
+
+function hostLines(party: NonNullable<CrowdView["party"]>, keys: (typeof CONTROLS)["keyboard"]): string[] {
+  const trick = TRICK_NAMES[party.trick ?? ""] ?? "Toast";
+  return [
+    "<b>Party Host</b>",
+    (party.tricksLeft ?? 0) > 0 ? `${keys.shoot} plays <b>${trick}</b> (${party.tricksLeft} left)` : "Out of tricks",
+    `${keys.act} changes trick`,
+  ];
+}
+
+// The host plays tricks the way a Lookout shoots: at a spot, from above.
+function aimsFromAbove(view: CrowdView): boolean {
+  return view.role === "lookout" || view.role === "host";
+}
+
+function canShoot(view: CrowdView): boolean {
+  return view.role === "host" ? (view.party?.tricksLeft ?? 0) > 0 : view.shots > 0;
 }
 
 function isFrozen(state: CrowdEntityState): boolean {

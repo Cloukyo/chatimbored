@@ -45,6 +45,10 @@
           </label>
           <button id="start-night" class="primary">Start Party Night</button>
         </div>
+        <details class="layers-box">
+          <summary>House rules for the night</summary>
+          <div id="night-layers" class="layers"></div>
+        </details>
         <h3>Or play one game</h3>
         <div id="modes" class="modes"></div>
         <div class="row">
@@ -61,16 +65,31 @@
         </header>
         <div id="mansion" class="mansion"></div>
         <p id="board-status" class="status" role="status"></p>
+        <p id="board-secret" class="secret" hidden></p>
+        <ul id="board-extras" class="extras"></ul>
         <ol id="scoreboard" class="players scoreboard"></ol>
+      </section>
+
+      <section id="night-step" class="screen card wide" hidden>
+        <h2 id="step-title"></h2>
+        <p id="step-blurb" class="muted"></p>
+        <div id="step-seats" class="step-seats"></div>
+        <div class="row">
+          <button id="step-skip" class="ghost">Skip ahead</button>
+        </div>
+        <p id="step-status" class="status" role="status"></p>
       </section>
 
       <section id="night-over" class="screen card wide" hidden>
         <h2 id="night-over-title"></h2>
+        <p id="mole-reveal" class="secret" hidden></p>
         <table class="standings">
           <thead><tr><th>Player</th><th>Points</th><th>Rooms</th><th>Connected</th><th>Total</th></tr></thead>
           <tbody id="standings"></tbody>
         </table>
         <p class="muted">Each claimed room is worth 2 points, plus 1 for each pair of your rooms that share a wall.</p>
+        <h3 id="awards-title">Awards</h3>
+        <ul id="awards" class="players awards"></ul>
         <button id="night-to-lobby" class="primary">Back to lobby</button>
         <p id="night-over-wait" class="muted">Waiting for the host.</p>
       </section>

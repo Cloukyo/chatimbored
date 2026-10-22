@@ -103,7 +103,9 @@ function createCrowdMinigame(id: string, name: string, rules: CrowdRules): Minig
       if (!room.game) return undefined;
       const match = matches.get(room);
       const night = room.night;
-      let crowd = night?.hostId === playerId ? match?.spectatorView("host") : match?.viewFor(playerId);
+      // The host sits the round out, and still watches it once it's over and they've stepped down.
+      const watching = night && match && !match.slots.has(playerId);
+      let crowd = watching ? match.spectatorView("host") : match?.viewFor(playerId);
       const round = night?.round;
       if (crowd && match && round) {
         const nameOf = (other: string) => room.players.find((player) => player.id === other)?.displayName ?? "Someone";

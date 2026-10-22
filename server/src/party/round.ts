@@ -167,9 +167,14 @@ export class NightRound implements CrowdObserver {
 
   partyView(match: CrowdMatch, playerId: string, nameOf: (id: string) => string): CrowdPartyView {
     const view: CrowdPartyView = {};
-    if (this.wantedHint) view.wanted = this.wantedHint;
+    if (this.wantedHint && !this.setup.finale) view.wanted = this.wantedHint;
+    // Who's hosting is public, so their trick can show even on a shared screen.
+    if (playerId === this.setup.hostId) {
+      view.trick = this.trick;
+      view.tricksLeft = this.tricksLeft;
+    }
     if (this.setup.sharedScreen) {
-      if (this.inviteHolder === playerId) view.holdingInvite = true;
+      if (this.inviteHolder === playerId && this.setup.options.invite && !this.setup.invitePaused) view.holdingInvite = true;
       return view;
     }
     const contract = this.contracts.get(playerId);
@@ -177,24 +182,18 @@ export class NightRound implements CrowdObserver {
       view.contract = contract.text;
       view.contractDone = contract.done;
     }
-    if (this.inviteHolder === playerId && this.setup.options.invite) view.holdingInvite = true;
+    if (this.inviteHolder === playerId && this.setup.options.invite && !this.setup.invitePaused) view.holdingInvite = true;
     const glimpse = this.glimpses.get(playerId);
     if (glimpse && match.tick <= GLIMPSE_FOR) view.glimpse = glimpse;
     const nemesis = this.setup.options.nemesis ? this.setup.nemesis.get(playerId) : undefined;
     if (nemesis) view.nemesisName = nameOf(nemesis);
     if (playerId === this.setup.hostId) {
-      view.trick = this.trick;
-      view.tricksLeft = this.tricksLeft;
       view.players = [...match.slots.values()].filter((slot) => !slot.entity.dead && !slot.entity.hidden).map((slot) => slot.entity.id);
     }
     return view;
   }
 
   // The shared screen's host still needs to know which trick is loaded.
-  hostView(): CrowdPartyView {
-    return { trick: this.trick, tricksLeft: this.tricksLeft, wanted: this.wantedHint };
-  }
-
   outcome(match: CrowdMatch): RoundOutcome {
     const contractsDone: string[] = [];
     for (const [playerId, contract] of this.contracts) {

@@ -28,14 +28,16 @@ Codex and VS Code should open the repo root, not only the Godot folder.
 
 ## Party Night
 
-- A Party Night wraps the crowd games: `server/src/party/PartyNight.ts` holds the night (points, claimed rooms, who picks next) on `room.night`, and `server/src/party/scoring.ts` turns a finished `CrowdMatch` into points per player. The mansion layout lives in `shared/party/night.ts`.
-- Room phases during a night: `board` (last place picks a room) → `in_game` → `results` → `board` again, then `night_over`. Everything on `room.night` is public.
-- Design doc: https://claude.ai/artifact/J6seXvPd1DHaaSfvicovTj. Later steps (shop, suspicion, ghosts, Last Dance and so on) are listed there.
+- A Party Night wraps the crowd games: `server/src/party/PartyNight.ts` holds the night (points, claimed rooms, who picks next, and every layer's state) on `room.night`, and `server/src/party/scoring.ts` turns a finished `CrowdMatch` into points per player. The mansion layout, layer list, perks, twists and host tricks live in `shared/party/night.ts`.
+- Layers are lobby switches (`NightOptions`). `server/src/party/round.ts` (`NightRound`) runs one round's layers as a `CrowdObserver` on the match: contracts (`contracts.ts`), suspicion, the cursed invite, Wanted, Nemesis, ghosts and the Party Host's tricks. `lastDance.ts` is the finale mode.
+- Room phases during a night: `board` (last place picks a room) → `in_game` → `results` → `shop` → `board` again; after the last round `mole_vote`, `finale_pick` and the Last Dance, then `night_over`. Between-round choices arrive as `NIGHT_ACTION` messages.
+- `room.nightFor(playerId)` is public apart from `secret`, which only its owner gets. Suspicion, the invite holder, contracts and the Mole stay server-side; never put them in the public snapshot.
+- Design doc: https://claude.ai/artifact/J6seXvPd1DHaaSfvicovTj.
 
 ## Couch Play
 
 - The web client supports several players on one screen with controllers. Each extra controller joins the room as its own player over its own WebSocket, so the server doesn't know or care.
-- A shared screen must not mark anyone: no "you" tag, no own-figure prediction, no private HUD lines. Secrets reach couch players through controller rumble (`client-web/src/input/pads.ts`). Modes that need private words (Marked) are left out on a shared screen.
+- A shared screen must not mark anyone: no "you" tag, no own-figure prediction, no private HUD lines. Secrets reach couch players through controller rumble (`client-web/src/input/pads.ts`). Modes and layers that need private words (Marked, contracts, the Mole, the Glimpse perk) are left out on a shared screen.
 
 ## Minigame Module Rules
 

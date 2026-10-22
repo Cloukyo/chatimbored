@@ -1,7 +1,18 @@
 import "./style.css";
 import type { CrowdInput } from "../../shared/crowd/protocol.js";
 import type { ClientMessage, GameSnapshot, RoomSnapshot, ServerMessage } from "../../shared/message-types/protocol.js";
-import { MANSION_ROOMS, type MansionRoomKey } from "../../shared/party/night.js";
+import {
+  HOST_MIN_PLAYERS,
+  MANSION_ROOMS,
+  NIGHT_LAYERS,
+  NIGHT_POINTS,
+  PERKS,
+  TWISTS,
+  defaultNightOptions,
+  type MansionRoomKey,
+  type NightOptions,
+  type NightSnapshot,
+} from "../../shared/party/night.js";
 import { CrowdGame, type GameSeat, type InputSource } from "./crowd/CrowdGame.js";
 import { PAD, PadEdges, connectedPads } from "./input/pads.js";
 import { Connection, resolveServerUrl, wakeServer } from "./net.js";
@@ -54,13 +65,13 @@ const MODES = [
   },
 ] as const;
 
-const ROLE_NAMES = { runner: "", killer: "Killer", hunter: "Hunter", ringer: "Ringer", lookout: "Lookout" } as const;
+const ROLE_NAMES = { runner: "", killer: "Killer", hunter: "Hunter", ringer: "Ringer", lookout: "Lookout", backer: "Backer", host: "Host" } as const;
 
 // Board colours, by join order.
 const PLAYER_COLORS = ["#e9806b", "#6ba3e9", "#7fb069", "#e8d26a", "#b48ce0", "#e0a64a", "#5fc7b9", "#e58bb5"];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const screens = { landing: $("landing"), lobby: $("lobby"), board: $("board"), nightOver: $("night-over"), game: $("game") };
+const screens = { landing: $("landing"), lobby: $("lobby"), board: $("board"), step: $("night-step"), nightOver: $("night-over"), game: $("game") };
 
 // An extra player on this screen, with their own controller and their own connection to the room.
 type CouchSeat = { key: string; pad: number; connection: Connection; playerId: string; readied: boolean };
@@ -73,6 +84,11 @@ let toastTimer: number | undefined;
 let mySource: InputSource = { kind: "keyboard" };
 let claimingPad = false;
 let boardFocus = 0;
+// The host's house rules for the next night. Layers that need private text switch off on a shared screen.
+const chosenLayers: NightOptions = defaultNightOptions(false);
+// Which button each of this screen's players has highlighted with a controller, between rounds.
+const stepFocus = new Map<string, number>();
+let stepPhase = "";
 const couchSeats: CouchSeat[] = [];
 const menuEdges = new PadEdges();
 
@@ -187,7 +203,46 @@ $("copy-link").addEventListener("click", async () => {
 
 function startNight(): void {
   const rounds = Number($<HTMLSelectElement>("night-length").value);
-  connection.send({ type: "START_NIGHT", rounds, sharedScreen: sharedScreen() });
+  connection.send({ type: "START_NIGHT", rounds, sharedScreen: sharedScreen(), options: nightOptions() });
+}
+
+function nightOptions(): NightOptions {
+  const shared = sharedScreen();
+  return Object.fromEntries(
+    NIGHT_LAYERS.map((layer) => [layer.key, chosenLayers[layer.key] && !(shared && layer.needsPrivateText)]),
+  ) as NightOptions;
+}
+
+function renderLayers(isHost: boolean): void {
+  const options = nightOptions();
+  const players = room?.players.length ?? 0;
+  $("night-layers").replaceChildren(
+    ...NIGHT_LAYERS.map((layer) => {
+      const label = document.createElement("label");
+      const blocked = sharedScreen() && layer.needsPrivateText;
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = options[layer.key];
+      box.disabled = !isHost || Boolean(blocked);
+      box.addEventListener("change", () => {
+        chosenLayers[layer.key] = box.checked;
+        renderLobby();
+      });
+      const text = document.createElement("div");
+      const note = blocked
+        ? " Off on a shared screen, since it needs secret words."
+        : layer.key === "host" && players < HOST_MIN_PLAYERS
+          ? ` Needs ${HOST_MIN_PLAYERS} or more players.`
+          : "";
+      text.append(layer.name);
+      const blurb = document.createElement("span");
+      blurb.textContent = `${layer.blurb}${note}`;
+      text.append(blurb);
+      label.className = options[layer.key] ? "" : "off";
+      label.append(box, text);
+      return label;
+    }),
+  );
 }
 
 function renderLobby(): void {
@@ -241,6 +296,7 @@ function renderLobby(): void {
   nightButton.hidden = !isHost;
   nightButton.disabled = !canStart;
   $<HTMLSelectElement>("night-length").disabled = !isHost;
+  renderLayers(isHost);
   $("lobby-status").textContent = !isHost
     ? "The host picks the game and starts when everyone's ready."
     : room.players.length < 2
@@ -360,11 +416,18 @@ function onPadMenu(pad: number, edges: Set<number>): void {
     const picker = boardPickerSeat();
     const padPicker = picker && (picker === playerId ? mine : couchSeatFor(picker)?.pad === pad);
     if (!padPicker && !hostPad) return;
-    const options = room.night?.options ?? [];
+    const options = room.night?.offered ?? [];
     if (edges.has(PAD.LEFT) || edges.has(PAD.UP)) boardFocus = (boardFocus + options.length - 1) % Math.max(1, options.length);
     if (edges.has(PAD.RIGHT) || edges.has(PAD.DOWN)) boardFocus = (boardFocus + 1) % Math.max(1, options.length);
     if (edges.has(PAD.A) && options[boardFocus]) pickRoom(options[boardFocus]);
     renderBoard();
+    return;
+  }
+
+  if (room.phase === "shop" || room.phase === "mole_vote" || room.phase === "finale_pick") {
+    const owner = mine ? playerId : seat?.playerId;
+    if (owner) moveStepFocus(owner, edges);
+    if (hostPad && edges.has(PAD.START)) connection.send({ type: "NIGHT_ACTION", action: { kind: "skip" } });
     return;
   }
 
@@ -401,7 +464,7 @@ function renderBoard(): void {
   if (!room || !night) return;
   const isHost = room.hostId === playerId;
   const picker = boardPickerSeat();
-  boardFocus = Math.min(boardFocus, Math.max(0, night.options.length - 1));
+  boardFocus = Math.min(boardFocus, Math.max(0, night.offered.length - 1));
   $("board-title").textContent = `Party Night · Round ${night.roundsPlayed + 1} of ${night.totalRounds}`;
   $("end-night").hidden = !isHost;
 
@@ -410,7 +473,7 @@ function renderBoard(): void {
       .sort((a, b) => a.row - b.row || a.col - b.col)
       .map((mansionRoom) => {
         const tile = document.createElement("button");
-        const offered = night.options.indexOf(mansionRoom.key);
+        const offered = night.offered.indexOf(mansionRoom.key);
         const played = night.played.includes(mansionRoom.key);
         const owner = night.claims[mansionRoom.key];
         const skipped = night.sharedScreen && mansionRoom.needsPrivateText;
@@ -439,6 +502,8 @@ function renderBoard(): void {
   const howTo = picker && picker === night.pickerId ? " Click a lit room, or use the d-pad and A." : picker ? " As host you can pick for them." : "";
   $("board-status").textContent = `${lastLine}${pickerName} is in last place and picks the next room.${howTo}`;
 
+  renderBoardExtras(night);
+
   const ranked = [...room.players].sort((a, b) => (night.points[b.id] ?? 0) - (night.points[a.id] ?? 0));
   $("scoreboard").replaceChildren(
     ...ranked.map((player) => {
@@ -447,18 +512,214 @@ function renderBoard(): void {
       who.append(swatch(player.id), `${player.displayName}${localLabel(player.id)}`);
       const rooms = Object.values(night.claims).filter((owner) => owner === player.id).length;
       const score = document.createElement("span");
-      score.innerHTML = `<b>${night.points[player.id] ?? 0}</b> pts · ${rooms} room${rooms === 1 ? "" : "s"}`;
+      const tips = night.options.shop ? ` · ${night.tips[player.id] ?? 0} tips` : "";
+      const wanted = night.wantedId === player.id ? " · Wanted" : "";
+      score.innerHTML = `<b>${night.points[player.id] ?? 0}</b> pts · ${rooms} room${rooms === 1 ? "" : "s"}${tips}${wanted}`;
       item.append(who, score);
       return item;
     }),
   );
 }
 
+// The night's running layers, in a line each.
+function renderBoardExtras(night: NightSnapshot): void {
+  const lines: string[] = [];
+  if (night.options.emptyingParty) lines.push(`${night.guests} guests are still at the party.`);
+  for (const key of night.twists) {
+    const twist = TWISTS.find((candidate) => candidate.key === key);
+    if (twist) lines.push(`Twist: ${twist.name}. ${twist.blurb}`);
+  }
+  if (night.wantedId) lines.push(`${nameOf(night.wantedId)} is Wanted: ${NIGHT_POINTS.wantedBounty} points to whoever takes them out.`);
+  if (night.options.invite) {
+    lines.push(
+      night.sharedScreen
+        ? "Someone holds the cursed invitation. Three soft taps on your controller now and then means it's you."
+        : "Someone holds the cursed invitation. If it's you, you'll see it during the round.",
+    );
+  }
+  if (night.options.host && (room?.players.length ?? 0) >= HOST_MIN_PLAYERS) lines.push("Each round, one player sits out as the Party Host and plays tricks on the crowd.");
+  $("board-extras").replaceChildren(
+    ...lines.map((line) => {
+      const item = document.createElement("li");
+      item.textContent = line;
+      return item;
+    }),
+  );
+  const target = night.secret?.moleTargetId;
+  const secret = $("board-secret");
+  secret.hidden = !target;
+  if (target) secret.textContent = `Only you can see this: you are the Mole. Make sure ${nameOf(target)} finishes the night in last place, without anyone working out it's you. Pull it off and it's worth ${NIGHT_POINTS.moleUnnoticed} points.`;
+}
+
+// Between rounds: the shop, the Mole vote and backing a finalist. Each of this screen's players gets a row.
+type StepChoice = { label: string; action: ClientMessage; chosen?: boolean; disabled?: boolean };
+
+function localPlayers(): string[] {
+  const ids = [playerId, ...couchSeats.map((seat) => seat.playerId)];
+  return ids.filter((id) => room?.players.some((player) => player.id === id));
+}
+
+function stepChoices(night: NightSnapshot, id: string): { note: string; choices: StepChoice[] } {
+  const phase = room?.phase;
+  const others = (room?.players ?? []).filter((player) => player.id !== id);
+  if (phase === "shop") {
+    const tips = night.tips[id] ?? 0;
+    const bought = night.perks[id];
+    const done = night.shopDone.includes(id);
+    const perks = PERKS.filter((perk) => !(night.sharedScreen && perk.needsPrivateText) && (!perk.needs || night.options[perk.needs]));
+    return {
+      note: done ? "Done shopping." : `${tips} tips to spend.`,
+      choices: [
+        ...perks.map((perk) => ({
+          label: `${perk.name} (${perk.cost})`,
+          action: { type: "NIGHT_ACTION", action: { kind: "buy", perk: perk.key } } as ClientMessage,
+          chosen: bought === perk.key,
+          disabled: done || Boolean(bought) || tips < perk.cost,
+        })),
+        { label: "Done", action: { type: "NIGHT_ACTION", action: { kind: "done" } }, disabled: done },
+      ],
+    };
+  }
+  if (phase === "mole_vote") {
+    const voted = night.moleVoted.includes(id);
+    return {
+      note: voted ? "Vote in. Waiting for everyone else." : "Who's the Mole?",
+      choices: others.map((player) => ({
+        label: player.displayName,
+        action: { type: "NIGHT_ACTION", action: { kind: "vote", playerId: player.id } } as ClientMessage,
+        disabled: voted,
+      })),
+    };
+  }
+  if (phase === "finale_pick") {
+    if (night.finalists?.includes(id)) return { note: "You're dancing in the Last Dance.", choices: [] };
+    const backed = night.backers[id];
+    return {
+      note: backed ? `Backing ${nameOf(backed)}.` : "Who are you backing?",
+      choices: (night.finalists ?? []).map((finalist) => ({
+        label: nameOf(finalist),
+        action: { type: "NIGHT_ACTION", action: { kind: "back", playerId: finalist } } as ClientMessage,
+        chosen: backed === finalist,
+        disabled: Boolean(backed),
+      })),
+    };
+  }
+  return { note: "", choices: [] };
+}
+
+const STEP_TEXT = {
+  shop: {
+    title: "The shop",
+    blurb: "Tips come from surviving, takedowns and contracts. Buy one perk for the next round, or save up.",
+  },
+  mole_vote: {
+    title: "Who's the Mole?",
+    blurb: `One of you has been quietly working to make someone finish last. Catch them and you get ${NIGHT_POINTS.moleCaughtVoter} points.`,
+  },
+  finale_pick: {
+    title: "The Last Dance",
+    blurb: `The top two dance in the Ballroom to decide the night. Back one of them: you'll steer a guest as a ghost to help, and get ${NIGHT_POINTS.backedFinalist} points if they win.`,
+  },
+} as const;
+
+function renderStep(): void {
+  const night = room?.night;
+  const phase = room?.phase;
+  if (!room || !night || (phase !== "shop" && phase !== "mole_vote" && phase !== "finale_pick")) return;
+  const text = STEP_TEXT[phase];
+  $("step-title").textContent = phase === "finale_pick" && night.finalists ? `The Last Dance: ${night.finalists.map(nameOf).join(" vs ")}` : text.title;
+  $("step-blurb").textContent = text.blurb;
+  const anyPad = mySource.kind === "pad" || couchSeats.length > 0;
+  $("step-seats").replaceChildren(
+    ...localPlayers().map((id) => {
+      const { note, choices } = stepChoices(night, id);
+      const focus = Math.min(stepFocus.get(id) ?? 0, Math.max(0, choices.length - 1));
+      const box = document.createElement("div");
+      box.className = "step-seat";
+      const heading = document.createElement("h4");
+      heading.append(swatch(id), `${nameOf(id)}${localLabel(id)}`);
+      const status = document.createElement("p");
+      status.className = "muted";
+      status.textContent = note;
+      const row = document.createElement("div");
+      row.className = "choices";
+      choices.forEach((choice, index) => {
+        const button = document.createElement("button");
+        button.textContent = choice.label;
+        button.disabled = Boolean(choice.disabled);
+        button.setAttribute("aria-pressed", String(Boolean(choice.chosen)));
+        if (anyPad && index === focus && !choice.disabled) button.classList.add("focused");
+        button.addEventListener("click", () => sendAs(id, choice.action));
+        row.append(button);
+      });
+      box.append(heading, status, row);
+      return box;
+    }),
+  );
+  const isHost = room.hostId === playerId;
+  $("step-skip").hidden = !isHost;
+  const waiting =
+    phase === "shop"
+      ? room.players.filter((player) => !night.shopDone.includes(player.id))
+      : phase === "mole_vote"
+        ? room.players.filter((player) => !night.moleVoted.includes(player.id))
+        : room.players.filter((player) => !night.finalists?.includes(player.id) && !night.backers[player.id]);
+  const padHelp = anyPad ? " Controllers: d-pad to choose, A to confirm." : "";
+  $("step-status").textContent = `${waiting.length > 0 ? `Waiting for ${waiting.map((player) => player.displayName).join(", ")}.` : ""}${padHelp}`;
+}
+
+function moveStepFocus(id: string, edges: Set<number>): void {
+  const night = room?.night;
+  if (!night) return;
+  const { choices } = stepChoices(night, id);
+  if (choices.length === 0) return;
+  let focus = Math.min(stepFocus.get(id) ?? 0, choices.length - 1);
+  if (edges.has(PAD.LEFT) || edges.has(PAD.UP)) focus = (focus + choices.length - 1) % choices.length;
+  if (edges.has(PAD.RIGHT) || edges.has(PAD.DOWN)) focus = (focus + 1) % choices.length;
+  stepFocus.set(id, focus);
+  const choice = choices[focus];
+  if (edges.has(PAD.A) && !choice.disabled) sendAs(id, choice.action);
+  renderStep();
+}
+
+$("step-skip").addEventListener("click", () => connection.send({ type: "NIGHT_ACTION", action: { kind: "skip" } }));
+
 function renderNightOver(): void {
   const night = room?.night;
   if (!room || !night?.standings) return;
   const winner = night.standings[0];
-  $("night-over-title").textContent = winner ? `${nameOf(winner.playerId)} wins the night!` : "The night is over.";
+  $("night-over-title").textContent = !winner
+    ? "The night is over."
+    : night.finaleWinner === winner.playerId
+      ? `${nameOf(winner.playerId)} wins the Last Dance and the night!`
+      : `${nameOf(winner.playerId)} wins the night!`;
+  const reveal = night.moleReveal;
+  const moleLine = $("mole-reveal");
+  moleLine.hidden = !reveal;
+  if (reveal) {
+    const plot = `${nameOf(reveal.moleId)} was the Mole, trying to put ${nameOf(reveal.targetId)} in last place.`;
+    moleLine.textContent = reveal.caught
+      ? `${plot} They got caught.`
+      : reveal.objectiveMet
+        ? `${plot} Nobody caught them, and it worked: +${NIGHT_POINTS.moleUnnoticed} points.`
+        : `${plot} Nobody caught them, but it didn't work.`;
+  }
+  const awards = night.awards ?? [];
+  $("awards-title").hidden = awards.length === 0;
+  $("awards").replaceChildren(
+    ...awards.map((award) => {
+      const item = document.createElement("li");
+      const title = document.createElement("span");
+      title.append(swatch(award.playerId));
+      const strong = document.createElement("b");
+      strong.textContent = award.title;
+      title.append(strong, ` ${nameOf(award.playerId)}`);
+      const detail = document.createElement("span");
+      detail.textContent = award.detail;
+      item.append(title, detail);
+      return item;
+    }),
+  );
   $("standings").replaceChildren(
     ...night.standings.map((standing) => {
       const row = document.createElement("tr");
@@ -471,6 +732,10 @@ function renderNightOver(): void {
   const isHost = room.hostId === playerId;
   $("night-to-lobby").hidden = !isHost;
   $("night-over-wait").hidden = isHost;
+}
+
+function signed(value: number): string {
+  return value < 0 ? `${value}` : `+${value}`;
 }
 
 function cell(value: number): HTMLTableCellElement {
@@ -540,7 +805,8 @@ function showResults(snapshot: GameSnapshot): void {
   $("results-title").textContent = title;
   // Round points arrive with the room update that follows the result.
   const night = room?.phase === "results" ? room.night : undefined;
-  const round = night?.lastRound && night.played.at(-1) === night.lastRound.room ? night.lastRound : undefined;
+  const last = night?.lastRound;
+  const round = last && (last.room === "ballroom" ? Boolean(night?.finaleWinner) : night?.played.at(-1) === last.room) ? last : undefined;
   $("reveal").replaceChildren(
     ...result.reveal.map((entry) => {
       const item = document.createElement("li");
@@ -549,7 +815,7 @@ function showResults(snapshot: GameSnapshot): void {
       const what = document.createElement("span");
       what.className = "tag";
       const role = entry.role === "runner" ? "" : `${ROLE_NAMES[entry.role]} · `;
-      const points = round ? ` · +${round.points[entry.playerId] ?? 0} pts${round.claimedBy === entry.playerId ? ", claims the room" : ""}` : "";
+      const points = round ? ` · ${signed(round.points[entry.playerId] ?? 0)} pts${round.claimedBy === entry.playerId ? ", claims the room" : ""}` : "";
       what.textContent = `${role}${entry.alive ? "survived" : "down"}${points}`;
       item.append(who, what);
       return item;
@@ -557,7 +823,7 @@ function showResults(snapshot: GameSnapshot): void {
   );
   const isHost = room?.hostId === playerId;
   $("next-round").hidden = !isHost || !room?.night;
-  $("next-round").textContent = night && night.roundsPlayed >= night.totalRounds ? "Final standings" : "Back to the mansion";
+  $("next-round").textContent = night && night.roundsPlayed >= night.totalRounds ? "Continue" : "Back to the mansion";
   $("back-to-lobby").hidden = !isHost || Boolean(room?.night);
   $("results-wait").hidden = isHost;
   $("results").hidden = false;
@@ -581,6 +847,13 @@ function onMessage(message: ServerMessage): void {
         stopGame();
         show("board");
         renderBoard();
+      } else if (room.phase === "shop" || room.phase === "mole_vote" || room.phase === "finale_pick") {
+        // Each step starts with every controller on its first choice.
+        if (screens.step.hidden || stepPhase !== room.phase) stepFocus.clear();
+        stepPhase = room.phase;
+        stopGame();
+        show("step");
+        renderStep();
       } else if (room.phase === "night_over") {
         stopGame();
         show("nightOver");

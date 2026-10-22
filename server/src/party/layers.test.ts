@@ -6,6 +6,7 @@ import { CrowdMatch, type CrowdRules } from "../crowd/CrowdMatch.js";
 import { actNaturalRules, silentWitnessRules } from "../crowd/modes.js";
 import { seededRandom } from "../crowd/random.js";
 import { setCrowdRandomForTests } from "../minigames/CrowdGames.js";
+import { getMinigame } from "../minigames/registry.js";
 import { RoomManager } from "../rooms/RoomManager.js";
 import { MIN_GUESTS, NIGHT_GUESTS, PartyNight } from "./PartyNight.js";
 import { SUSPICION } from "./round.js";
@@ -219,6 +220,22 @@ test("with five players one of them hosts, sits out, and scores when a trick pre
   const [first, second] = [...match.slots.keys()];
   shoot(match, first, second);
   assert.equal(night.round!.outcome(match).bonus.get(host), NIGHT_POINTS.hostTrick);
+});
+
+test("the Party Host keeps seeing the round once it's over", () => {
+  const manager = new RoomManager(seededRandom(21));
+  const { room, player: first } = manager.createRoom("P0");
+  const others = [1, 2, 3, 4].map((index) => manager.joinRoom(room.code, `P${index}`).player);
+  const finished = () => manager.finishGame(room);
+  for (const other of others) manager.handleRoomMessage(other.id, { type: "PLAYER_READY", isReady: true }, finished);
+  manager.handleRoomMessage(first.id, { type: "START_NIGHT", rounds: 4, sharedScreen: false, options: only("host") }, finished);
+  manager.handleRoomMessage(first.id, { type: "PICK_ROOM", roomKey: room.night!.offered[0] }, finished);
+  const hostId = room.night!.hostId!;
+  const minigame = getMinigame(room.selectedMinigameId)!;
+  assert.equal(minigame.snapshotFor!(room, hostId)!.crowd!.role, "host");
+  manager.finishGame(room);
+  assert.equal(room.night!.hostId, undefined);
+  assert.ok(minigame.snapshotFor!(room, hostId)!.crowd!.result);
 });
 
 test("twists stack up after each round", () => {

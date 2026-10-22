@@ -90,4 +90,6 @@ export const CUES = {
   heartbeat: [{ ms: 80, strong: 0.7, gapMs: 90 }, { ms: 80, strong: 0.5 }],
   dark: [{ ms: 160, strong: 0.25 }],
   down: [{ ms: 500, strong: 0.4 }],
+  // Three soft taps now and then: you're holding the cursed invitation.
+  invite: [{ ms: 60, strong: 0.3, gapMs: 120 }, { ms: 60, strong: 0.3, gapMs: 120 }, { ms: 60, strong: 0.3 }],
 };

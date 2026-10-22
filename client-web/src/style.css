@@ -859,3 +859,38 @@ input.rename {
   padding: 4px 8px;
   max-width: 220px;
 }
+
+.sound-box {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 8px;
+  z-index: 5;
+}
+
+button.round {
+  width: 42px;
+  height: 42px;
+  padding: 9px;
+  border-radius: 50%;
+  background: rgb(20 24 22 / 80%);
+}
+
+button.round svg {
+  width: 100%;
+  height: 100%;
+}
+
+.sound-panel {
+  width: 220px;
+  padding: 14px;
+  gap: 10px;
+}
+
+.sound-panel input[type="range"] {
+  padding: 0;
+  accent-color: var(--accent);
+}

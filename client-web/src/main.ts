@@ -16,6 +16,7 @@ import {
 import { CrowdGame, type GameSeat, type InputSource } from "./crowd/CrowdGame.js";
 import { PAD, PadEdges, connectedPads } from "./input/pads.js";
 import { roomIcon } from "./party/icons.js";
+import { sound } from "./audio/sound.js";
 import { Connection, resolveServerUrl, wakeServer } from "./net.js";
 
 const MODES = [
@@ -90,6 +91,7 @@ const chosenLayers: NightOptions = defaultNightOptions(false);
 // Which button each of this screen's players has highlighted with a controller, between rounds.
 const stepFocus = new Map<string, number>();
 let stepPhase = "";
+let nightOverPlayed = false;
 const couchSeats: CouchSeat[] = [];
 const menuEdges = new PadEdges();
 
@@ -116,6 +118,25 @@ const connection = new Connection(
   },
   () => ($("landing-status").textContent = "Waking up the game server. This can take up to a minute the first time."),
 );
+
+// Sound -------------------------------------------------------------------
+
+const musicVolume = $<HTMLInputElement>("music-volume");
+const effectsVolume = $<HTMLInputElement>("effects-volume");
+musicVolume.value = String(sound.settings.music);
+effectsVolume.value = String(sound.settings.effects);
+for (const slider of [musicVolume, effectsVolume]) {
+  slider.addEventListener("input", () => sound.setVolumes({ music: Number(musicVolume.value), effects: Number(effectsVolume.value) }));
+}
+$("sound-toggle").addEventListener("click", () => {
+  const panel = $("sound-panel");
+  panel.hidden = !panel.hidden;
+  $("sound-toggle").setAttribute("aria-expanded", String(!panel.hidden));
+});
+// A soft click for every button press.
+document.addEventListener("click", (event) => {
+  if (event.target instanceof HTMLElement && event.target.closest("button")) sound.play("click");
+});
 
 // Reconnecting ----------------------------------------------------------
 // Each seat on this screen has a secret token from the server. A refresh or a dropped connection sends it back
@@ -896,6 +917,10 @@ function renderNightOver(): void {
       return step;
     }),
   );
+  if (!nightOverPlayed) {
+    nightOverPlayed = true;
+    sound.play("win");
+  }
   const reveal = night.moleReveal;
   const moleLine = $("mole-reveal");
   moleLine.hidden = !reveal;
@@ -1101,6 +1126,7 @@ function onMessage(message: ServerMessage): void {
       if (message.resumeToken) myToken = message.resumeToken;
       saveSession();
       if (room.selectedMinigameId.startsWith("crowd_")) selectedMode = room.selectedMinigameId;
+      if (room.phase !== "night_over") nightOverPlayed = false;
       history.replaceState(null, "", `?room=${room.code}${serverQuery()}`);
       if (room.phase === "lobby") {
         stopGame();

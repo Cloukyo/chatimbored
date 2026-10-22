@@ -25,6 +25,7 @@ import {
   toWorld,
 } from "./draw.js";
 import { HOST_TRICKS } from "../../../shared/party/night.js";
+import { sound } from "../audio/sound.js";
 import { CUES, PAD, PadEdges, padAim, padMove, pressed, readPad, rumble } from "../input/pads.js";
 
 // Others are drawn this far in the past so there are always two snapshots to blend between.
@@ -126,6 +127,9 @@ export class CrowdGame {
   private floor?: HTMLCanvasElement;
   private floorMode?: CrowdView["mode"];
   private hudHeight = 0;
+  private resultPlayed = false;
+  private lastSecond = -1;
+  private lastStep = 0;
   private viewport: View2D = { scale: 1, offsetX: 0, offsetY: 0 };
   private readonly keys = new Set<string>();
   private readonly seats: SeatState[];
@@ -173,9 +177,13 @@ export class CrowdGame {
       this.frame = requestAnimationFrame(loop);
     };
     this.frame = requestAnimationFrame(loop);
+    sound.play("start");
+    sound.setCrowd(true);
   }
 
   destroy(): void {
+    sound.setCrowd(false);
+    sound.setTense(false);
     this.abort.abort();
     window.clearInterval(this.inputTimer);
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);
@@ -206,6 +214,12 @@ export class CrowdGame {
     while (this.snapshots.length > 12) this.snapshots.shift();
 
     this.collectEvents(view, figures, now);
+    if (view.result && !this.resultPlayed) {
+      this.resultPlayed = true;
+      sound.setCrowd(false);
+      sound.setTense(false);
+      this.playResult(view);
+    }
     if (!this.shared) this.reconcile(view, figures, now);
     this.updateHud();
   }
@@ -383,18 +397,48 @@ export class CrowdGame {
   }
 
   private collectEvents(view: CrowdView, figures: Map<number, Figure>, now: number): void {
+    // Sounds sit left or right with where they happened.
+    const pan = (at: CrowdVector) => ((at.x / view.arena.width) * 2 - 1) * 0.7;
+    // The first view also carries the last few seconds of events; show those but don't replay their sounds.
+    const quiet = this.seenEvents.size === 0 && this.snapshots.length <= 1;
     for (const event of view.events) {
       if (this.seenEvents.has(event.id)) continue;
       this.seenEvents.add(event.id);
-      if (event.type === "shot") this.effects.push({ born: now, kind: "shot", from: event.from, to: event.to });
+      if (event.type === "shot") {
+        this.effects.push({ born: now, kind: "shot", from: event.from, to: event.to });
+        if (!quiet) sound.play("shot", pan(event.from));
+      }
       if (event.type === "down") {
         const figure = figures.get(event.entity);
         if (figure) this.effects.push({ born: now, kind: "puff", at: { x: figure.x, y: figure.y } });
+        if (!quiet) sound.play("down", figure ? pan(figure) : 0);
       }
-      if (event.type === "strike") this.effects.push({ born: now, kind: "strike", at: event.at });
-      if (event.type === "bump") this.effects.push({ born: now, kind: "bump", at: event.at });
-      if (event.type === "flare") this.flares.set(event.prop, now);
+      if (event.type === "strike") {
+        this.effects.push({ born: now, kind: "strike", at: event.at });
+        if (!quiet) sound.play("strike", pan(event.at));
+      }
+      if (event.type === "bump") {
+        this.effects.push({ born: now, kind: "bump", at: event.at });
+        if (!quiet) sound.play("bump", pan(event.at));
+      }
+      if (event.type === "flare") {
+        this.flares.set(event.prop, now);
+        const prop = view.props.find((candidate) => candidate.id === event.prop);
+        if (prop && !quiet) sound.play(prop.kind === "bell" ? "bell" : prop.kind === "vault" ? "vault" : "chime", pan(prop));
+      }
     }
+  }
+
+  // A sting when the round ends: a win or a loss for a screen with one player, a plain reveal on a shared one.
+  private playResult(view: CrowdView): void {
+    const result = view.result!;
+    const mine = this.shared ? undefined : result.reveal.find((entry) => entry.entity === view.you);
+    if (!mine) {
+      sound.play("reveal");
+      return;
+    }
+    const won = mine.playerId === result.winnerPlayerId || (result.winnerRole !== undefined && mine.role === result.winnerRole);
+    sound.play(won ? "win" : "lose");
   }
 
   private updateHud(): void {
@@ -513,6 +557,11 @@ export class CrowdGame {
       const seconds = this.secondsLeft();
       timer.textContent = `${seconds}s`;
       timer.classList.toggle("urgent", seconds <= 10 && !view?.result);
+      if (seconds !== this.lastSecond && view && !view.result) {
+        this.lastSecond = seconds;
+        if (seconds <= 10 && seconds > 0) sound.play("tick");
+        sound.setTense(seconds <= 15);
+      }
     }
     if (!view || !this.floor) return;
 
@@ -524,6 +573,11 @@ export class CrowdGame {
 
     const figures = this.interpolated(now);
     const self = this.shared ? undefined : figures.get(view.you);
+    // Your own footsteps, only on a screen with one player.
+    if (self && this.predicted?.moving && !view.result && now - this.lastStep > (this.predicted.running ? 210 : 340)) {
+      this.lastStep = now;
+      sound.play("step", ((self.x / view.arena.width) * 2 - 1) * 0.5);
+    }
     if (self && this.predicted && !view.result) {
       const shown = this.displayedSelf(now);
       self.x = shown.x;

@@ -123,6 +123,15 @@
       </section>
     </main>
     <div id="toast" class="toast" hidden></div>
+    <div class="sound-box">
+      <button id="sound-toggle" class="ghost round" aria-label="Sound settings" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /></svg>
+      </button>
+      <div id="sound-panel" class="sound-panel card" hidden>
+        <label>Music <input id="music-volume" type="range" min="0" max="1" step="0.05" /></label>
+        <label>Effects <input id="effects-volume" type="range" min="0" max="1" step="0.05" /></label>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

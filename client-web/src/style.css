@@ -894,3 +894,76 @@ button.round svg {
   padding: 0;
   accent-color: var(--accent);
 }
+
+/* Touch controls. */
+#arena {
+  touch-action: none;
+}
+
+.touch-controls {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 180px;
+  pointer-events: none;
+}
+
+.touch-controls .stick {
+  position: absolute;
+  left: 24px;
+  bottom: 24px;
+  width: 136px;
+  height: 136px;
+  border-radius: 50%;
+  background: rgb(20 24 22 / 45%);
+  border: 2px solid rgb(236 230 214 / 25%);
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-controls .knob {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgb(236 230 214 / 55%);
+  transition: transform 60ms linear;
+}
+
+.touch-buttons {
+  position: absolute;
+  right: 70px;
+  bottom: 28px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-end;
+  pointer-events: auto;
+}
+
+.touch-buttons button {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  font-weight: 700;
+  background: rgb(20 24 22 / 60%);
+  border: 2px solid rgb(236 230 214 / 35%);
+  touch-action: none;
+  user-select: none;
+}
+
+.touch-buttons .touch-act {
+  width: 92px;
+  height: 92px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-height: 480px) {
+  .hud-lines {
+    font-size: 12px;
+  }
+
+  .hud-lines span {
+    padding: 2px 8px;
+  }
+}

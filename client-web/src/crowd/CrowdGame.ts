@@ -117,7 +117,16 @@ type SeatState = {
 const CONTROLS = {
   keyboard: { shoot: "Click", act: "E", run: "Shift" },
   pad: { shoot: "X", act: "A", run: "RB" },
+  touch: { shoot: "Tap", act: "Act", run: "Run" },
 };
+
+// Phones and tablets: a stick and two buttons on screen, and a tap on the crowd shoots.
+const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+const STICK_RADIUS = 52;
+
+function controlsFor(source: InputSource): (typeof CONTROLS)["keyboard"] {
+  return source.kind === "pad" ? CONTROLS.pad : TOUCH ? CONTROLS.touch : CONTROLS.keyboard;
+}
 
 export class CrowdGame {
   private endsAt = 0;
@@ -128,6 +137,9 @@ export class CrowdGame {
   private floorMode?: CrowdView["mode"];
   private hudHeight = 0;
   private resultPlayed = false;
+  private touchMove: CrowdVector = { x: 0, y: 0 };
+  private touchRun = false;
+  private touchControls?: HTMLElement;
   private lastSecond = -1;
   private lastStep = 0;
   private viewport: View2D = { scale: 1, offsetX: 0, offsetY: 0 };
@@ -179,9 +191,63 @@ export class CrowdGame {
     this.frame = requestAnimationFrame(loop);
     sound.play("start");
     sound.setCrowd(true);
+    if (TOUCH && !shared) this.addTouchControls(signal);
+  }
+
+  // A thumb stick on the left, Act and Run on the right. Taps elsewhere on the arena shoot, like a click.
+  private addTouchControls(signal: AbortSignal): void {
+    const box = document.createElement("div");
+    box.className = "touch-controls";
+    box.innerHTML = `<div class="stick"><div class="knob"></div></div><div class="touch-buttons"><button class="touch-run">Run</button><button class="touch-act">Act</button></div>`;
+    this.canvas.parentElement!.append(box);
+    this.touchControls = box;
+    const stick = box.querySelector<HTMLElement>(".stick")!;
+    const knob = box.querySelector<HTMLElement>(".knob")!;
+    let stickPointer: number | undefined;
+    const moveStick = (event: PointerEvent) => {
+      const rect = stick.getBoundingClientRect();
+      let x = event.clientX - (rect.left + rect.width / 2);
+      let y = event.clientY - (rect.top + rect.height / 2);
+      const length = Math.hypot(x, y);
+      if (length > STICK_RADIUS) {
+        x = (x / length) * STICK_RADIUS;
+        y = (y / length) * STICK_RADIUS;
+      }
+      knob.style.transform = `translate(${x}px, ${y}px)`;
+      // A small dead zone so a resting thumb doesn't drift.
+      this.touchMove = length < 12 ? { x: 0, y: 0 } : { x: x / STICK_RADIUS, y: y / STICK_RADIUS };
+    };
+    const release = (event: PointerEvent) => {
+      if (event.pointerId !== stickPointer) return;
+      stickPointer = undefined;
+      knob.style.transform = "";
+      this.touchMove = { x: 0, y: 0 };
+    };
+    stick.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      stickPointer = event.pointerId;
+      stick.setPointerCapture(event.pointerId);
+      moveStick(event);
+    }, { signal });
+    stick.addEventListener("pointermove", (event) => event.pointerId === stickPointer && moveStick(event), { signal });
+    stick.addEventListener("pointerup", release, { signal });
+    stick.addEventListener("pointercancel", release, { signal });
+    const act = box.querySelector<HTMLElement>(".touch-act")!;
+    act.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      const keyboard = this.keyboardSeat();
+      if (keyboard) keyboard.pendingAct = true;
+    }, { signal });
+    const run = box.querySelector<HTMLElement>(".touch-run")!;
+    run.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      this.touchRun = true;
+    }, { signal });
+    for (const type of ["pointerup", "pointercancel", "pointerleave"]) run.addEventListener(type, () => (this.touchRun = false), { signal });
   }
 
   destroy(): void {
+    this.touchControls?.remove();
     sound.setCrowd(false);
     sound.setTense(false);
     this.abort.abort();
@@ -303,7 +369,8 @@ export class CrowdGame {
         x: (this.held(KEYS.right) ? 1 : 0) - (this.held(KEYS.left) ? 1 : 0),
         y: (this.held(KEYS.down) ? 1 : 0) - (this.held(KEYS.up) ? 1 : 0),
       };
-      run = this.held(KEYS.run);
+      run = this.held(KEYS.run) || this.touchRun;
+      if (move.x === 0 && move.y === 0) move = this.touchMove;
     }
     run = run && view.canRun && !view.ghost;
 
@@ -457,7 +524,7 @@ export class CrowdGame {
   private partyLines(view: CrowdView): string[] {
     const party = view.party;
     if (!party) return [];
-    const keys = CONTROLS[this.seats[0].seat.source.kind];
+    const keys = controlsFor(this.seats[0].seat.source);
     const lines: string[] = [];
     if (view.role === "host") lines.push(...hostLines(party, keys));
     if (party.contract) lines.push(`Contract: ${escapeHtml(party.contract)}${party.contractDone ? " ✓" : ""}`);
@@ -473,18 +540,18 @@ export class CrowdGame {
     const wanted = this.seats.find((state) => state.view?.party?.wanted)?.view?.party?.wanted;
     if (wanted) lines.push(`Wanted: the leader is ${escapeHtml(wanted)}`);
     const host = this.seats.find((state) => state.view?.role === "host");
-    if (host?.view?.party) lines.push(...hostLines(host.view.party, CONTROLS[host.seat.source.kind]));
+    if (host?.view?.party) lines.push(...hostLines(host.view.party, controlsFor(host.seat.source)));
     return lines;
   }
 
   private hudLines(view: CrowdView): string[] {
-    const keys = CONTROLS[this.seats[0].seat.source.kind];
+    const keys = controlsFor(this.seats[0].seat.source);
     if (view.role === "host") return [];
     const progress = `${view.hud.progress ?? 0}/${view.hud.goal ?? 0}`;
     const shot = (aim: string) => (view.shots > 0 ? `${keys.shoot} to shoot ${aim} (${view.shots} left)` : "Out of shots");
     switch (view.mode) {
       case "act_natural":
-        return ["Reach the exit first", shot("a rival"), `${keys.run} runs, but people notice`];
+        return ["Reach the exit first", shot("a rival"), `Running (${keys.run}) gets noticed`];
       case "silent_witness":
         return view.role === "killer"
           ? ["You are the <b>Killer</b>", view.canAct ? `${keys.act} to strike someone close` : "Strike recharging", `Bodies ${view.hud.kills ?? 0}/${view.hud.killTarget ?? 5}`]
@@ -708,7 +775,7 @@ function sharedHudLines(view: CrowdView): string[] {
   }
 }
 
-function hostLines(party: NonNullable<CrowdView["party"]>, keys: (typeof CONTROLS)["keyboard"]): string[] {
+function hostLines(party: NonNullable<CrowdView["party"]>, keys: ReturnType<typeof controlsFor>): string[] {
   const trick = TRICK_NAMES[party.trick ?? ""] ?? "Toast";
   return [
     "<b>Party Host</b>",

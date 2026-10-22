@@ -3,14 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>chatImbored</title>
+    <title>Morbid Masquerade · chatImbored</title>
     <link rel="icon" href="data:," />
   </head>
   <body>
     <main id="app">
       <section id="landing" class="screen card">
-        <h1>chatImbored</h1>
-        <p class="muted">Blend into the crowd. Spot your friends before they spot you.</p>
+        <div class="brand">
+          <svg class="mask" viewBox="0 0 64 32" aria-hidden="true">
+            <path d="M4 6c8-4 18-4 28 3 10-7 20-7 28-3 1 10-3 20-12 22-7 1-11-4-16-4s-9 5-16 4C7 26 3 16 4 6z" />
+            <ellipse cx="19" cy="15" rx="6.5" ry="4" />
+            <ellipse cx="45" cy="15" rx="6.5" ry="4" />
+          </svg>
+          <p class="eyebrow">a chatImbored game</p>
+          <h1>Morbid Masquerade</h1>
+        </div>
+        <p class="muted">Blend into the crowd at a deadly masked party. Spot your friends before they spot you.</p>
         <label>Your name <input id="name" maxlength="24" autocomplete="nickname" placeholder="Display name" /></label>
         <button id="create" class="primary">Create room</button>
         <div class="row">
@@ -49,7 +57,7 @@
           <summary>House rules for the night</summary>
           <div id="night-layers" class="layers"></div>
         </details>
-        <h3>Or play one game</h3>
+        <h3>Quick play: one room</h3>
         <div id="modes" class="modes"></div>
         <div class="row">
           <button id="ready">Ready</button>

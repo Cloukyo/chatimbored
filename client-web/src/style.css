@@ -61,6 +61,44 @@ h1 {
   letter-spacing: -0.02em;
 }
 
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.brand h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 38px;
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+}
+
+.brand .mask {
+  width: 96px;
+  height: 48px;
+  margin-bottom: 4px;
+  filter: drop-shadow(0 4px 12px rgb(224 166 74 / 35%));
+}
+
+.brand .mask path {
+  fill: var(--accent);
+}
+
+.brand .mask ellipse {
+  fill: var(--panel);
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .muted {
   color: var(--muted);
   margin: 0;
@@ -791,4 +829,8 @@ label.inline {
     animation: none !important;
     transition: none !important;
   }
+}
+
+#landing > .muted {
+  text-align: center;
 }

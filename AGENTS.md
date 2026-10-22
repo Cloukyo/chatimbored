@@ -28,6 +28,7 @@ Codex and VS Code should open the repo root, not only the Godot folder.
 
 ## Party Night
 
+- The crowd games are one game in the chatImbored hub, called **Morbid Masquerade**. Party Night is its main mode, and the nine crowd modes are its quick-play rooms.
 - A Party Night wraps the crowd games: `server/src/party/PartyNight.ts` holds the night (points, claimed rooms, who picks next, and every layer's state) on `room.night`, and `server/src/party/scoring.ts` turns a finished `CrowdMatch` into points per player. The mansion layout, layer list, perks, twists and host tricks live in `shared/party/night.ts`.
 - Layers are lobby switches (`NightOptions`). `server/src/party/round.ts` (`NightRound`) runs one round's layers as a `CrowdObserver` on the match: contracts (`contracts.ts`), suspicion, the cursed invite, Wanted, Nemesis, ghosts and the Party Host's tricks. `lastDance.ts` is the finale mode.
 - Room phases during a night: `board` (last place picks a room) → `in_game` → `results` → `shop` → `board` again; after the last round `mole_vote`, `finale_pick` and the Last Dance, then `night_over`. Between-round choices arrive as `NIGHT_ACTION` messages.

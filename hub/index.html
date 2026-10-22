@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>chatImbored</title>
+    <meta name="description" content="Online party games to play with friends: share a room code and go." />
+    <style>
+      :root {
+        --bg: #1d2321;
+        --panel: #2a322f;
+        --panel-edge: #3a4440;
+        --text: #ece6d6;
+        --muted: #a9a594;
+        --accent: #e0a64a;
+        --accent-text: #241a08;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(ellipse at top, #2b3531 0%, var(--bg) 60%);
+        color: var(--text);
+        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 920px; margin: 0 auto; padding: 48px 16px 64px; }
+      header { margin-bottom: 36px; }
+      h1 {
+        margin: 0;
+        font: 700 clamp(2.4rem, 7vw, 3.6rem)/1.05 Georgia, "Times New Roman", serif;
+        letter-spacing: -0.01em;
+      }
+      h1 span { color: var(--accent); }
+      header p { color: var(--muted); margin: 10px 0 0; max-width: 520px; }
+      h2 {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+        margin: 40px 0 14px;
+      }
+      .feature {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 24px;
+        align-items: center;
+        padding: 28px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #3a2a3c 0%, #2a322f 70%);
+        border: 1px solid #5a4560;
+        text-decoration: none;
+        color: inherit;
+        transition: transform 0.15s, border-color 0.15s;
+      }
+      .feature:hover, .feature:focus-visible { transform: translateY(-2px); border-color: var(--accent); }
+      .feature svg { width: 140px; fill: var(--accent); }
+      .feature svg ellipse { fill: #3a2a3c; }
+      .feature h3 { margin: 0 0 6px; font: 700 1.9rem/1.1 Georgia, "Times New Roman", serif; }
+      .feature p { margin: 0 0 14px; color: var(--muted); }
+      .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+      .tag {
+        font-size: 0.78rem;
+        padding: 2px 10px;
+        border-radius: 999px;
+        background: rgba(236, 230, 214, 0.08);
+        color: var(--text);
+      }
+      .play {
+        display: inline-block;
+        padding: 10px 22px;
+        border-radius: 10px;
+        background: var(--accent);
+        color: var(--accent-text);
+        font-weight: 700;
+      }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+      .game {
+        display: block;
+        padding: 20px;
+        border-radius: 14px;
+        background: var(--panel);
+        border: 1px solid var(--panel-edge);
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 0.15s;
+      }
+      .game:hover, .game:focus-visible { border-color: var(--accent); }
+      .game h3 { margin: 0 0 4px; font-size: 1.15rem; }
+      .game p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+      .game .icon { font-size: 1.6rem; margin-bottom: 8px; }
+      footer { margin-top: 48px; color: var(--muted); font-size: 0.85rem; }
+      @media (max-width: 560px) {
+        .feature { grid-template-columns: 1fr; padding: 22px; }
+        .feature svg { width: 96px; order: -1; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>chat<span>Im</span>bored</h1>
+        <p>Party games to play online with friends, or on one screen with controllers. Make a room, share the code, and go.</p>
+      </header>
+
+      <a class="feature" href="/play/">
+        <div>
+          <h3>Morbid Masquerade</h3>
+          <p>Blend into the crowd at a deadly masked party. Spot your friends before they spot you, room by room through a haunted mansion.</p>
+          <div class="tags">
+            <span class="tag">2 to 8 players</span>
+            <span class="tag">Party Night or quick play</span>
+            <span class="tag">Controllers and phones</span>
+          </div>
+          <span class="play">Play now</span>
+        </div>
+        <svg viewBox="0 0 64 32" aria-hidden="true">
+          <path d="M4 6c8-4 18-4 28 3 10-7 20-7 28-3 1 10-3 20-12 22-7 1-11-4-16-4s-9 5-16 4C7 26 3 16 4 6z" />
+          <ellipse cx="19" cy="15" rx="6.5" ry="4" />
+          <ellipse cx="45" cy="15" rx="6.5" ry="4" />
+        </svg>
+      </a>
+
+      <h2>More games</h2>
+      <div class="grid">
+        <a class="game" href="/classic/index.html">
+          <div class="icon" aria-hidden="true">💰</div>
+          <h3>Loot &amp; Leave</h3>
+          <p>Dodge the slimes, grab gems and rubies, and cash out richest.</p>
+        </a>
+        <a class="game" href="/classic/index.html">
+          <div class="icon" aria-hidden="true">🎲</div>
+          <h3>Lucky Seven</h3>
+          <p>Flip cards for points, but a repeat costs you the round. Know when to stop.</p>
+        </a>
+        <a class="game" href="/classic/index.html">
+          <div class="icon" aria-hidden="true">⚡</div>
+          <h3>Button Race</h3>
+          <p>A quick warm-up: who can mash fastest?</p>
+        </a>
+      </div>
+      <footer>The games above share one lobby. Pick the game once you are in a room.</footer>
+    </main>
+  </body>
+</html>

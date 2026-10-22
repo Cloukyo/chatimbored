@@ -48,14 +48,10 @@ func _build_ui() -> void:
 	minigame_selector = OptionButton.new()
 	minigame_selector.add_item("Button Race")
 	minigame_selector.set_item_metadata(0, "button_race")
-	minigame_selector.add_item("Act Natural")
-	minigame_selector.set_item_metadata(1, "act_natural")
 	minigame_selector.add_item("Loot & Leave")
-	minigame_selector.set_item_metadata(2, "loot_and_leave")
-	minigame_selector.add_item("Silent Witness")
-	minigame_selector.set_item_metadata(3, "silent_witness")
+	minigame_selector.set_item_metadata(1, "loot_and_leave")
 	minigame_selector.add_item("Lucky Seven")
-	minigame_selector.set_item_metadata(4, "lucky_seven")
+	minigame_selector.set_item_metadata(2, "lucky_seven")
 	root.add_child(minigame_selector)
 
 	players_box = VBoxContainer.new()
@@ -107,12 +103,8 @@ func _render() -> void:
 
 	if room.phase == "in_game":
 		var game_id: String = str(room.game.get("minigameId", room.selected_minigame_id))
-		if game_id == "act_natural":
-			get_tree().change_scene_to_file("res://scenes/ActNatural.tscn")
-		elif game_id == "loot_and_leave":
+		if game_id == "loot_and_leave":
 			get_tree().change_scene_to_file("res://scenes/LootAndLeave.tscn")
-		elif game_id == "silent_witness":
-			get_tree().change_scene_to_file("res://scenes/SilentWitness.tscn")
 		elif game_id == "lucky_seven":
 			get_tree().change_scene_to_file("res://scenes/LuckySeven.tscn")
 		else:

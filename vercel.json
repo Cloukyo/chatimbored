@@ -1,7 +1,7 @@
 {
   "installCommand": "npm install",
   "buildCommand": "npm run vercel-build",
-  "outputDirectory": "client-godot/builds/web",
+  "outputDirectory": "dist",
   "cleanUrls": false,
   "trailingSlash": false,
   "headers": [
@@ -26,8 +26,8 @@
   ],
   "redirects": [
     {
-      "source": "/",
-      "destination": "/play/",
+      "source": "/index.html",
+      "destination": "/",
       "permanent": false
     }
   ]

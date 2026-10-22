@@ -49,34 +49,6 @@ func start_game(minigame_id := "") -> void:
 func send_press() -> void:
 	_send({"type": "PLAYER_INPUT", "input": "PRESS"})
 
-func send_act_natural_input(movement: Vector2, aim: Vector2, shoot: bool, run: bool, target_point = null) -> void:
-	var input := {
-		"movement": {"x": movement.x, "y": movement.y},
-		"aim": {"x": aim.x, "y": aim.y},
-		"shoot": shoot,
-		"run": run
-	}
-	if target_point != null:
-		input["targetPoint"] = {"x": target_point.x, "y": target_point.y}
-	_send({
-		"type": "PLAYER_INPUT",
-		"input": input
-	})
-
-func send_silent_witness_input(movement: Vector2, aim: Vector2, shoot: bool, kill: bool, target_point = null) -> void:
-	var input := {
-		"movement": {"x": movement.x, "y": movement.y},
-		"aim": {"x": aim.x, "y": aim.y},
-		"shoot": shoot,
-		"kill": kill
-	}
-	if target_point != null:
-		input["targetPoint"] = {"x": target_point.x, "y": target_point.y}
-	_send({
-		"type": "PLAYER_INPUT",
-		"input": input
-	})
-
 func send_loot_and_leave_input(movement: Vector2, sequence: int) -> void:
 	_send({
 		"type": "PLAYER_INPUT",

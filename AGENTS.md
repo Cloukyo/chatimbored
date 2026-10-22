@@ -35,6 +35,13 @@ Codex and VS Code should open the repo root, not only the Godot folder.
 - `room.nightFor(playerId)` is public apart from `secret`, which only its owner gets. Suspicion, the invite holder, contracts and the Mole stay server-side; never put them in the public snapshot.
 - Design doc: https://claude.ai/artifact/J6seXvPd1DHaaSfvicovTj.
 
+## Site, Reconnect, Sound and Touch
+
+- The deployed site is assembled in `dist/` by `npm run vercel-build`: the hub (`hub/index.html`) at `/`, Morbid Masquerade at `/play/`, and the Godot games at `/classic/index.html`.
+- Act Natural and Silent Witness live only in Morbid Masquerade now; their Godot scenes are gone. The old `act_natural` and `silent_witness` server minigames stay until the committed Godot export is re-exported without them.
+- Every player gets a resume token in ROOM_STATE. A dropped socket marks the player away (an NPC brain walks their figure) and holds the seat for 90s; RESUME with the token takes it back. The web client keeps tokens in sessionStorage.
+- Sound is synthesised in `client-web/src/audio/sound.ts` (no audio files). Touch controls appear on coarse pointers.
+
 ## Couch Play
 
 - The web client supports several players on one screen with controllers. Each extra controller joins the room as its own player over its own WebSocket, so the server doesn't know or care.

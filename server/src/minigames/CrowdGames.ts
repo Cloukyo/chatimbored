@@ -42,18 +42,31 @@ function createCrowdMinigame(id: string, name: string, rules: CrowdRules): Minig
     tickBroadcastOnly: true,
 
     setup(room: Room): GameSnapshot {
-      matches.set(room, new CrowdMatch(rules, room.players.map((player) => player.id), crowdRandom()));
+      const night = room.night;
+      let roundMs = CROWD_ROUND_MS;
+      if (night) {
+        // Party Night reshapes the round: fewer guests, twists, a host sitting out, ghosts.
+        const round = night.prepareRound(rules);
+        const match = new CrowdMatch(round.rules, round.playerIds, crowdRandom(), { ghosts: round.ghosts, observer: night.round });
+        night.round!.begin(match);
+        matches.set(room, match);
+        roundMs = round.roundMs;
+      } else {
+        matches.set(room, new CrowdMatch(rules, room.players.map((player) => player.id), crowdRandom()));
+      }
       return {
         minigameId: id,
         name,
-        endsAt: Date.now() + CROWD_ROUND_MS,
+        endsAt: Date.now() + roundMs,
         scores: Object.fromEntries(room.players.map((player) => [player.id, player.score])),
       };
     },
 
     handleInput(room: Room, playerId: string | undefined, input: unknown): GameSnapshot {
       const match = matches.get(room);
-      if (match && playerId && isCrowdInput(input)) match.queueInput(playerId, input);
+      if (!match || !playerId || !isCrowdInput(input)) return room.game!;
+      if (playerId === room.night?.hostId) room.night.round?.hostInput(match, input);
+      else match.queueInput(playerId, input);
       return room.game!;
     },
 
@@ -88,7 +101,16 @@ function createCrowdMinigame(id: string, name: string, rules: CrowdRules): Minig
 
     snapshotFor(room: Room, playerId: string): GameSnapshot | undefined {
       if (!room.game) return undefined;
-      const crowd = matches.get(room)?.viewFor(playerId);
+      const match = matches.get(room);
+      const night = room.night;
+      // The host sits the round out, and still watches it once it's over and they've stepped down.
+      const watching = night && match && !match.slots.has(playerId);
+      let crowd = watching ? match.spectatorView("host") : match?.viewFor(playerId);
+      const round = night?.round;
+      if (crowd && match && round) {
+        const nameOf = (other: string) => room.players.find((player) => player.id === other)?.displayName ?? "Someone";
+        crowd = { ...crowd, party: round.partyView(match, playerId, nameOf) };
+      }
       return { ...room.game, scores: { ...room.game.scores }, crowd };
     },
   };
@@ -120,3 +142,6 @@ export const crowdMarked = createCrowdMinigame("crowd_marked", "Marked", markedR
 export const crowdFreezeFrame = createCrowdMinigame("crowd_freeze_frame", "Freeze Frame", freezeFrameRules);
 export const crowdHotParcel = createCrowdMinigame("crowd_hot_parcel", "Hot Parcel", hotParcelRules);
 export const crowdClosingTime = createCrowdMinigame("crowd_closing_time", "Closing Time", closingTimeRules);
+// Party Night's finale. Only a night can start it; the night supplies the real rules.
+export const LAST_DANCE_ID = "crowd_last_dance";
+export const crowdLastDance = createCrowdMinigame(LAST_DANCE_ID, "Last Dance", { ...actNaturalRules, mode: "last_dance" });

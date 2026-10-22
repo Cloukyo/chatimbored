@@ -3,14 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>chatImbored</title>
+    <title>Morbid Masquerade · chatImbored</title>
     <link rel="icon" href="data:," />
   </head>
   <body>
     <main id="app">
       <section id="landing" class="screen card">
-        <h1>chatImbored</h1>
-        <p class="muted">Blend into the crowd. Spot your friends before they spot you.</p>
+        <div class="brand">
+          <svg class="mask" viewBox="0 0 64 32" aria-hidden="true">
+            <path d="M4 6c8-4 18-4 28 3 10-7 20-7 28-3 1 10-3 20-12 22-7 1-11-4-16-4s-9 5-16 4C7 26 3 16 4 6z" />
+            <ellipse cx="19" cy="15" rx="6.5" ry="4" />
+            <ellipse cx="45" cy="15" rx="6.5" ry="4" />
+          </svg>
+          <p class="eyebrow">a chatImbored game</p>
+          <h1>Morbid Masquerade</h1>
+        </div>
+        <p class="muted">Blend into the crowd at a deadly masked party. Spot your friends before they spot you.</p>
         <label>Your name <input id="name" maxlength="24" autocomplete="nickname" placeholder="Display name" /></label>
         <button id="create" class="primary">Create room</button>
         <div class="row">
@@ -29,7 +37,27 @@
           </div>
         </header>
         <ul id="players" class="players"></ul>
-        <h3>Game</h3>
+        <div id="couch" class="couch">
+          <p id="couch-hint" class="muted">Playing on one screen? Press <b>A</b> on each extra controller to add a player.</p>
+          <button id="claim-pad" class="ghost">Play with a controller myself</button>
+        </div>
+        <h3>Party Night</h3>
+        <p class="muted">A night at the mansion: rounds in different rooms, points for every round, last place picks the next room, and each winner claims the room they won.</p>
+        <div class="row">
+          <label class="inline">Rounds
+            <select id="night-length">
+              <option value="4">4 (short)</option>
+              <option value="6" selected>6</option>
+              <option value="8">8 (long)</option>
+            </select>
+          </label>
+          <button id="start-night" class="primary">Start Party Night</button>
+        </div>
+        <details class="layers-box">
+          <summary>House rules for the night</summary>
+          <div id="night-layers" class="layers"></div>
+        </details>
+        <h3>Quick play: one room</h3>
         <div id="modes" class="modes"></div>
         <div class="row">
           <button id="ready">Ready</button>
@@ -38,12 +66,57 @@
         <p id="lobby-status" class="status" role="status"></p>
       </section>
 
+      <section id="board" class="screen card wide" hidden>
+        <header class="row spread">
+          <h2 id="board-title">Party Night</h2>
+          <button id="end-night" class="ghost">End night</button>
+        </header>
+        <div id="mansion" class="mansion"></div>
+        <p id="board-status" class="status" role="status"></p>
+        <p id="board-secret" class="secret" hidden></p>
+        <ul id="board-extras" class="extras"></ul>
+        <ol id="scoreboard" class="players scoreboard"></ol>
+      </section>
+
+      <section id="night-step" class="screen card wide" hidden>
+        <h2 id="step-title"></h2>
+        <p id="step-blurb" class="muted"></p>
+        <div id="step-seats" class="step-seats"></div>
+        <div class="row">
+          <button id="step-skip" class="ghost">Skip ahead</button>
+        </div>
+        <p id="step-status" class="status" role="status"></p>
+      </section>
+
+      <section id="night-over" class="screen card wide" hidden>
+        <h2 id="night-over-title"></h2>
+        <div id="podium" class="podium"></div>
+        <p id="mole-reveal" class="secret" hidden></p>
+        <table class="standings">
+          <thead><tr><th>Player</th><th>Points</th><th>Rooms</th><th>Connected</th><th>Total</th></tr></thead>
+          <tbody id="standings"></tbody>
+        </table>
+        <p class="muted">Each claimed room is worth 2 points, plus 1 for each pair of your rooms that share a wall.</p>
+        <h3 id="awards-title">Awards</h3>
+        <ul id="awards" class="players awards"></ul>
+        <button id="night-to-lobby" class="primary">Back to lobby</button>
+        <p id="night-over-wait" class="muted">Waiting for the host.</p>
+      </section>
+
       <section id="game" class="screen game" hidden>
         <canvas id="arena"></canvas>
         <div id="hud" class="hud"></div>
+        <div id="round-intro" class="round-intro" hidden>
+          <div id="intro-icon" class="intro-icon"></div>
+          <p id="intro-round" class="intro-round"></p>
+          <h2 id="intro-room"></h2>
+          <p id="intro-mode" class="intro-mode"></p>
+          <p id="intro-blurb" class="muted"></p>
+        </div>
         <div id="results" class="results card" hidden>
           <h2 id="results-title"></h2>
           <ul id="reveal" class="players"></ul>
+          <button id="next-round" class="primary">Next</button>
           <button id="back-to-lobby" class="primary">Back to lobby</button>
           <p id="results-wait" class="muted">Waiting for the host to head back to the lobby.</p>
         </div>

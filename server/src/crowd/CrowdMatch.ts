@@ -51,6 +51,28 @@ export type CrowdSlot = {
   lastRun: boolean;
   ack: number;
   connected: boolean;
+  // Other players this player took down with a shot or a strike, for scoring across rounds.
+  takedowns: string[];
+  shotsFired: number;
+  // Shots that didn't take down another player.
+  wastedShots: number;
+  // Party Night: once down, a player can steer one NPC around as a ghost.
+  ghost?: CrowdEntity;
+  // Shots other players wasted on this player's ghost.
+  baits: number;
+};
+
+export type CrowdMatchOptions = {
+  // Players who go down take over an NPC instead of sitting out.
+  ghosts?: boolean;
+  observer?: CrowdObserver;
+};
+
+// Lets a layer on top of the modes (Party Night) watch a round without the modes knowing.
+export type CrowdObserver = {
+  onTick?(match: CrowdMatch): void;
+  onDeath?(match: CrowdMatch, entity: CrowdEntity, victim: CrowdSlot | undefined, actor: CrowdSlot | undefined): void;
+  onShot?(match: CrowdMatch, shooter: CrowdSlot, from: CrowdVector, to: CrowdVector, hit: CrowdEntity | undefined): void;
 };
 
 export type CrowdRules = {
@@ -66,6 +88,7 @@ export type CrowdRules = {
   shotStyle?(role: CrowdRole): "ray" | "aimed";
   props?(arena: CrowdArena, random: Random): Omit<CrowdProp, "id">[];
   canAct?(match: CrowdMatch, slot: CrowdSlot): boolean;
+  onStart?(match: CrowdMatch): void;
   spawnPoint(random: Random, arena: CrowdArena): CrowdVector;
   // Picks the next thing an NPC does: a direction to walk, or stand still for a while.
   npcPlan(entity: CrowdEntity, random: Random, arena: CrowdArena, match: CrowdMatch): { direction: CrowdVector; durationMs: number };
@@ -94,11 +117,14 @@ export class CrowdMatch {
   private nextEventId = 1;
   private packedTick = -1;
   private packed: number[] = [];
+  // Whoever's shot or strike is being resolved, so a death can be credited to them.
+  private actor?: CrowdSlot;
 
   constructor(
     readonly rules: CrowdRules,
     playerIds: string[],
     random: Random,
+    readonly options: CrowdMatchOptions = {},
   ) {
     this.random = random;
     const total = rules.npcCount + playerIds.length;
@@ -143,8 +169,13 @@ export class CrowdMatch {
         lastRun: false,
         ack: 0,
         connected: true,
+        takedowns: [],
+        shotsFired: 0,
+        wastedShots: 0,
+        baits: 0,
       });
     }
+    rules.onStart?.(this);
   }
 
   get arena(): CrowdArena {
@@ -175,6 +206,10 @@ export class CrowdMatch {
         slot.lastRun = input.run && this.rules.canRun;
       }
       const entity = slot.entity;
+      if (slot.ghost) {
+        this.moveGhost(slot);
+        continue;
+      }
       if (entity.dead || entity.brain) continue;
       if (entity.hidden) {
         if (input?.shoot && slot.shots > 0) this.shoot(slot, input.shoot);
@@ -192,7 +227,7 @@ export class CrowdMatch {
       if (!input) continue;
       if (input.shoot && slot.shots > 0) this.shoot(slot, input.shoot);
       if (this.result) return;
-      if (input.act && slot.actCooldownMs <= 0) this.rules.onAct?.(this, slot);
+      if (input.act && slot.actCooldownMs <= 0) this.withActor(slot, () => this.rules.onAct?.(this, slot));
     }
 
     for (const entity of this.entities) {
@@ -218,6 +253,7 @@ export class CrowdMatch {
     }
 
     if (!this.result) this.rules.onTick(this);
+    if (!this.result) this.options.observer?.onTick?.(this);
   }
 
   timeout(): CrowdResult {
@@ -237,6 +273,8 @@ export class CrowdMatch {
     slot.queue = [];
     // A player who leaves keeps wandering as part of the crowd, so their body doesn't give anything away.
     if (!slot.entity.dead && !slot.entity.hidden) slot.entity.brain = { timerMs: 0 };
+    if (slot.ghost && !slot.ghost.dead) slot.ghost.brain = { timerMs: 0 };
+    slot.ghost = undefined;
     this.rules.onPlayerLeft?.(this, slot);
   }
 
@@ -294,7 +332,41 @@ export class CrowdMatch {
     entity.direction = { x: 0, y: 0 };
     entity.running = false;
     this.emit({ type: "down", entity: entity.id });
+    const victim = this.slotForEntity(entity);
+    if (victim && this.actor && victim !== this.actor) this.actor.takedowns.push(victim.playerId);
+    const haunted = this.ghostSlotFor(entity);
+    if (haunted) {
+      if (this.actor && this.actor !== haunted) haunted.baits += 1;
+      haunted.ghost = undefined;
+      this.makeGhost(haunted);
+    }
     this.rules.onEntityDied?.(this, entity, cause);
+    this.options.observer?.onDeath?.(this, entity, victim, this.actor);
+    if (victim && this.options.ghosts && victim.connected) this.makeGhost(victim);
+  }
+
+  // Hands a player who is out of the round a random NPC to steer.
+  makeGhost(slot: CrowdSlot): void {
+    const taken = new Set([...this.slots.values()].map((other) => other.ghost));
+    const free = this.entities.filter((entity) => entity.brain && !entity.dead && !entity.hidden && !taken.has(entity));
+    if (free.length === 0) return;
+    const ghost = free[Math.floor(this.random() * free.length)];
+    ghost.brain = undefined;
+    slot.ghost = ghost;
+  }
+
+  ghostSlotFor(entity: CrowdEntity): CrowdSlot | undefined {
+    for (const slot of this.slots.values()) if (slot.ghost === entity) return slot;
+    return undefined;
+  }
+
+  // Ghosts walk at crowd pace and can't run, shoot or act.
+  private moveGhost(slot: CrowdSlot): void {
+    const ghost = slot.ghost!;
+    if (ghost.dead || ghost.stunMs > 0 || ghost.sickMs > 0) return;
+    ghost.direction = slot.lastDirection;
+    ghost.running = false;
+    this.move(ghost);
   }
 
   emit(event: DistributiveOmit<CrowdEvent, "id">): void {
@@ -309,7 +381,8 @@ export class CrowdMatch {
       mode: this.rules.mode,
       arena: this.arena,
       tick: this.tick,
-      you: slot.entity.hidden ? 0 : slot.entity.id,
+      you: slot.ghost ? slot.ghost.id : slot.entity.hidden ? 0 : slot.entity.id,
+      ghost: slot.ghost ? true : undefined,
       ack: slot.ack,
       role: slot.role,
       alive: !slot.entity.dead,
@@ -322,6 +395,38 @@ export class CrowdMatch {
       zone: this.rules.zone?.(this),
       mine: [...slot.mine],
       hud: this.rules.hud?.(this, slot) ?? {},
+      result: this.result ? { ...this.result, reveal: this.reveal() } : undefined,
+    };
+  }
+
+  private withActor(slot: CrowdSlot, resolve: () => void): void {
+    this.actor = slot;
+    try {
+      resolve();
+    } finally {
+      this.actor = undefined;
+    }
+  }
+
+  // For someone watching from outside the crowd, like Party Night's host.
+  spectatorView(role: CrowdRole): CrowdView {
+    return {
+      mode: this.rules.mode,
+      arena: this.arena,
+      tick: this.tick,
+      you: 0,
+      ack: 0,
+      role,
+      alive: true,
+      shots: 0,
+      canAct: false,
+      canRun: false,
+      e: this.packEntities(),
+      events: this.events.filter((stored) => stored.tick >= this.tick - EVENT_WINDOW_TICKS).map((stored) => stored.event),
+      props: this.props,
+      zone: this.rules.zone?.(this),
+      mine: [],
+      hud: {},
       result: this.result ? { ...this.result, reveal: this.reveal() } : undefined,
     };
   }
@@ -353,6 +458,13 @@ export class CrowdMatch {
 
   private shoot(slot: CrowdSlot, target: CrowdVector): void {
     slot.shots -= 1;
+    slot.shotsFired += 1;
+    const before = slot.takedowns.length;
+    this.resolveShot(slot, target);
+    if (slot.takedowns.length === before) slot.wastedShots += 1;
+  }
+
+  private resolveShot(slot: CrowdSlot, target: CrowdVector): void {
     if (this.rules.shotStyle?.(slot.role) === "aimed") {
       this.aimedShot(slot, target);
       return;
@@ -366,7 +478,8 @@ export class CrowdMatch {
       if (hit && (!best || hit.distance < best.distance)) best = { entity, ...hit };
     }
     this.emit({ type: "shot", from, to: best?.point ?? end });
-    if (best) this.rules.onShotHit(this, slot, best.entity);
+    this.options.observer?.onShot?.(this, slot, from, best?.point ?? end, best?.entity);
+    if (best) this.withActor(slot, () => this.rules.onShotHit(this, slot, best!.entity));
   }
 
   // An arrow from above: drops on the clicked point and hits the closest body under it.
@@ -379,7 +492,8 @@ export class CrowdMatch {
     }
     const to = best ? { x: best.entity.x, y: best.entity.y } : { x: target.x, y: target.y + BODY_HEIGHT };
     this.emit({ type: "shot", from: { x: to.x - 60, y: -40 }, to });
-    if (best) this.rules.onShotHit(this, slot, best.entity);
+    this.options.observer?.onShot?.(this, slot, to, to, best?.entity);
+    if (best) this.withActor(slot, () => this.rules.onShotHit(this, slot, best!.entity));
   }
 }
 

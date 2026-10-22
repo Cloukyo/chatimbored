@@ -19,12 +19,26 @@ Codex and VS Code should open the repo root, not only the Godot folder.
 - The server owns room state, player membership, ready state, minigame phase, timers, scores, and winners.
 - The client may request actions but must not decide winners or final scores.
 - Validate all incoming client messages before mutating room state.
-- Keep rooms in memory for this prototype. Do not add accounts, database persistence, matchmaking, payments, chat, analytics, cosmetics, or a board wrapper yet.
+- Keep rooms in memory for this prototype. Do not add accounts, database persistence, matchmaking, payments, chat, analytics, or cosmetics yet.
 
 ## Crowd Games
 
 - Crowd games run on `server/src/crowd/CrowdMatch.ts`; each mode is a `CrowdRules` object in `server/src/crowd/modes.ts`.
 - Clients must never be able to tell players from NPCs. Send per-player views (`snapshotFor`), keep hidden state off `room.game`, give players and NPCs the same speeds, directions and look, and never send another player's id or role during a round.
+
+## Party Night
+
+- The crowd games are one game in the chatImbored hub, called **Morbid Masquerade**. Party Night is its main mode, and the nine crowd modes are its quick-play rooms.
+- A Party Night wraps the crowd games: `server/src/party/PartyNight.ts` holds the night (points, claimed rooms, who picks next, and every layer's state) on `room.night`, and `server/src/party/scoring.ts` turns a finished `CrowdMatch` into points per player. The mansion layout, layer list, perks, twists and host tricks live in `shared/party/night.ts`.
+- Layers are lobby switches (`NightOptions`). `server/src/party/round.ts` (`NightRound`) runs one round's layers as a `CrowdObserver` on the match: contracts (`contracts.ts`), suspicion, the cursed invite, Wanted, Nemesis, ghosts and the Party Host's tricks. `lastDance.ts` is the finale mode.
+- Room phases during a night: `board` (last place picks a room) → `in_game` → `results` → `shop` → `board` again; after the last round `mole_vote`, `finale_pick` and the Last Dance, then `night_over`. Between-round choices arrive as `NIGHT_ACTION` messages.
+- `room.nightFor(playerId)` is public apart from `secret`, which only its owner gets. Suspicion, the invite holder, contracts and the Mole stay server-side; never put them in the public snapshot.
+- Design doc: https://claude.ai/artifact/J6seXvPd1DHaaSfvicovTj.
+
+## Couch Play
+
+- The web client supports several players on one screen with controllers. Each extra controller joins the room as its own player over its own WebSocket, so the server doesn't know or care.
+- A shared screen must not mark anyone: no "you" tag, no own-figure prediction, no private HUD lines. Secrets reach couch players through controller rumble (`client-web/src/input/pads.ts`). Modes and layers that need private words (Marked, contracts, the Mole, the Glimpse perk) are left out on a shared screen.
 
 ## Minigame Module Rules
 

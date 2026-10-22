@@ -8,6 +8,7 @@ import {
 } from "../../../shared/crowd/protocol.js";
 import {
   type Figure,
+  type FloorStyle,
   type View2D,
   drawBump,
   drawCrosshair,
@@ -23,6 +24,8 @@ import {
   paintFloor,
   toWorld,
 } from "./draw.js";
+import { HOST_TRICKS } from "../../../shared/party/night.js";
+import { CUES, PAD, PadEdges, padAim, padMove, pressed, readPad, rumble } from "../input/pads.js";
 
 // Others are drawn this far in the past so there are always two snapshots to blend between.
 const INTERPOLATION_DELAY_MS = 100;
@@ -45,6 +48,23 @@ const MODE_TITLES: Record<CrowdView["mode"], string> = {
   freeze_frame: "Freeze Frame",
   hot_parcel: "Hot Parcel",
   closing_time: "Closing Time",
+  last_dance: "The Last Dance",
+};
+
+const TRICK_NAMES: Record<string, string> = Object.fromEntries(HOST_TRICKS.map((trick) => [trick.key, trick.name]));
+
+// Each mode is played in its own room of the mansion.
+const FLOOR_STYLES: Record<CrowdView["mode"], FloorStyle> = {
+  act_natural: "hall",
+  silent_witness: "library",
+  lantern_festival: "garden",
+  bell_ringers: "tower",
+  heist_hour: "vault",
+  marked: "gallery",
+  freeze_frame: "music",
+  hot_parcel: "post",
+  closing_time: "terrace",
+  last_dance: "ballroom",
 };
 
 type Snapshot = { time: number; figures: Map<number, Figure> };
@@ -62,20 +82,54 @@ const KEYS = {
   act: ["KeyE", "Space"],
 };
 
+// How far ahead of a controller player their shot is aimed, along the stick or the way they face.
+const PAD_SHOT_REACH = 400;
+const PAD_CURSOR_SPEED = 900;
+const PULSE_MS = { holding: 1000, holdingLate: 500, dark: 450, invite: 3000 };
+
 export type PlayerNames = (playerId: string) => string;
 
+export type InputSource = { kind: "keyboard" } | { kind: "pad"; index: number };
+
+// One player at this screen. Several seats share one screen on a couch.
+export type GameSeat = {
+  id: string;
+  source: InputSource;
+  send(input: CrowdInput): void;
+};
+
+type SeatState = {
+  seat: GameSeat;
+  view?: CrowdView;
+  seq: number;
+  pendingShot?: CrowdVector;
+  pendingAct: boolean;
+  // A controller Lookout aims with an on-screen cursor instead of the mouse.
+  cursor?: CrowdVector;
+  cued: boolean;
+  mineCount: number;
+  alive: boolean;
+  lastPulse: number;
+  lastInvitePulse: number;
+};
+
+const CONTROLS = {
+  keyboard: { shoot: "Click", act: "E", run: "Shift" },
+  pad: { shoot: "X", act: "A", run: "RB" },
+};
+
 export class CrowdGame {
-  private view?: CrowdView;
   private endsAt = 0;
   private snapshots: Snapshot[] = [];
   // Estimated local time of server tick 0; the smallest observed offset is the least delayed.
   private tickClockOffset = Number.POSITIVE_INFINITY;
   private floor?: HTMLCanvasElement;
+  private floorMode?: CrowdView["mode"];
+  private hudHeight = 0;
   private viewport: View2D = { scale: 1, offsetX: 0, offsetY: 0 };
   private readonly keys = new Set<string>();
-  private pendingShot?: CrowdVector;
-  private pendingAct = false;
-  private seq = 0;
+  private readonly seats: SeatState[];
+  private readonly padEdges = new PadEdges();
   private pending: Pending[] = [];
   private predicted?: { from: CrowdVector; to: CrowdVector; steppedAt: number; facing: number; moving: boolean; running: boolean };
   private readonly seenEvents = new Set<number>();
@@ -86,12 +140,15 @@ export class CrowdGame {
   private frame?: number;
   private readonly abort = new AbortController();
 
+  // `shared`: several people are watching this one screen, so nobody's figure, role or secrets are shown.
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly hud: HTMLElement,
-    private readonly sendInput: (input: CrowdInput) => void,
+    seats: GameSeat[],
     private readonly nameOf: PlayerNames,
+    private readonly shared = false,
   ) {
+    this.seats = seats.map((seat) => ({ seat, seq: 0, pendingAct: false, cued: false, mineCount: 0, alive: true, lastPulse: 0, lastInvitePulse: 0 }));
     const signal = this.abort.signal;
     window.addEventListener("keydown", (event) => this.onKey(event, true), { signal });
     window.addEventListener("keyup", (event) => this.onKey(event, false), { signal });
@@ -100,8 +157,9 @@ export class CrowdGame {
     canvas.addEventListener(
       "pointerdown",
       (event) => {
-        if (event.button !== 0) return;
-        this.pendingShot = toWorld(this.viewport, this.canvasPoint(event));
+        const keyboard = this.keyboardSeat();
+        if (event.button !== 0 || !keyboard) return;
+        keyboard.pendingShot = toWorld(this.viewport, this.canvasPoint(event));
       },
       { signal },
     );
@@ -123,10 +181,23 @@ export class CrowdGame {
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);
   }
 
-  applyView(view: CrowdView, endsAt: number): void {
+  // The first seat's view drives the picture; every seat's view drives its own input and cues.
+  private get view(): CrowdView | undefined {
+    return this.seats[0].view;
+  }
+
+  applyView(seatId: string, view: CrowdView, endsAt: number): void {
+    const state = this.seats.find((candidate) => candidate.seat.id === seatId);
+    if (!state) return;
+    state.view = view;
+    this.cue(state, view);
+    if (state !== this.seats[0]) return;
+
     const now = performance.now();
-    if (!this.floor || this.view?.arena.width !== view.arena.width) this.floor = paintFloor(view.arena);
-    this.view = view;
+    if (!this.floor || this.floorMode !== view.mode) {
+      this.floor = paintFloor(view.arena, FLOOR_STYLES[view.mode]);
+      this.floorMode = view.mode;
+    }
     this.endsAt = endsAt;
 
     this.tickClockOffset = Math.min(this.tickClockOffset, now - view.tick * CROWD_TICK_MS);
@@ -135,13 +206,51 @@ export class CrowdGame {
     while (this.snapshots.length > 12) this.snapshots.shift();
 
     this.collectEvents(view, figures, now);
-    this.reconcile(view, figures, now);
+    if (!this.shared) this.reconcile(view, figures, now);
     this.updateHud();
+  }
+
+  private keyboardSeat(): SeatState | undefined {
+    return this.seats.find((state) => state.seat.source.kind === "keyboard");
+  }
+
+  // Private news for a controller player, felt rather than shown.
+  private cue(state: SeatState, view: CrowdView): void {
+    const source = state.seat.source;
+    if (source.kind !== "pad" || view.result) return;
+    const now = performance.now();
+    if (!state.cued) {
+      state.cued = true;
+      state.mineCount = view.mine.length;
+      rumble(source.index, view.role === "killer" || view.role === "ringer" ? CUES.special : CUES.ordinary);
+      return;
+    }
+    if (state.alive && !view.alive) rumble(source.index, CUES.down);
+    state.alive = view.alive;
+    if (view.mine.length > state.mineCount) rumble(source.index, CUES.tick);
+    state.mineCount = view.mine.length;
+    if (view.party?.holdingInvite && now - state.lastInvitePulse >= PULSE_MS.invite) {
+      state.lastInvitePulse = now;
+      rumble(source.index, CUES.invite);
+    }
+    if (!view.alive) return;
+    if (view.hud.holding) {
+      const every = (view.hud.fuseSeconds ?? 10) <= 3 ? PULSE_MS.holdingLate : PULSE_MS.holding;
+      if (now - state.lastPulse >= every) {
+        state.lastPulse = now;
+        rumble(source.index, CUES.heartbeat);
+      }
+    } else if ((view.hud.darkMs ?? 0) > 0 && now - state.lastPulse >= PULSE_MS.dark) {
+      state.lastPulse = now;
+      rumble(source.index, CUES.dark);
+    }
   }
 
   private onKey(event: KeyboardEvent, down: boolean): void {
     if (event.target instanceof HTMLInputElement) return;
-    if (KEYS.act.includes(event.code) && down && !event.repeat) this.pendingAct = true;
+    const keyboard = this.keyboardSeat();
+    if (!keyboard) return;
+    if (KEYS.act.includes(event.code) && down && !event.repeat) keyboard.pendingAct = true;
     if (Object.values(KEYS).some((codes) => codes.includes(event.code))) event.preventDefault();
     if (down) this.keys.add(event.code);
     else this.keys.delete(event.code);
@@ -152,26 +261,49 @@ export class CrowdGame {
   }
 
   private tickInput(): void {
-    const view = this.view;
-    if (!view || view.result || !view.alive) {
-      this.pendingShot = undefined;
-      this.pendingAct = false;
+    for (const state of this.seats) this.tickSeat(state);
+  }
+
+  private tickSeat(state: SeatState): void {
+    const view = state.view;
+    const source = state.seat.source;
+    const pad = source.kind === "pad" ? readPad(source.index) : undefined;
+    const edges = pad ? this.padEdges.poll(pad) : new Set<number>();
+    // A ghost keeps steering its guest after going down.
+    if (!view || view.result || !(view.alive || view.ghost)) {
+      state.pendingShot = undefined;
+      state.pendingAct = false;
       return;
     }
-    const move = {
-      x: (this.held(KEYS.right) ? 1 : 0) - (this.held(KEYS.left) ? 1 : 0),
-      y: (this.held(KEYS.down) ? 1 : 0) - (this.held(KEYS.up) ? 1 : 0),
-    };
-    const run = this.held(KEYS.run) && view.canRun;
-    this.seq += 1;
-    const input: CrowdInput = { kind: "crowd", seq: this.seq, move, run, act: this.pendingAct };
-    if (this.pendingShot && view.shots > 0) input.shoot = roundPoint(this.pendingShot);
-    this.pendingShot = undefined;
-    this.pendingAct = false;
-    this.sendInput(input);
 
+    let move: CrowdVector;
+    let run: boolean;
+    if (pad) {
+      move = padMove(pad);
+      run = pressed(pad, PAD.RB) || pressed(pad, PAD.B);
+      if (edges.has(PAD.A)) state.pendingAct = true;
+      if (aimsFromAbove(view)) this.moveCursor(state, view, pad);
+      if ((edges.has(PAD.X) || edges.has(PAD.RT)) && canShoot(view)) state.pendingShot = this.padShotTarget(state, view, pad);
+    } else {
+      move = {
+        x: (this.held(KEYS.right) ? 1 : 0) - (this.held(KEYS.left) ? 1 : 0),
+        y: (this.held(KEYS.down) ? 1 : 0) - (this.held(KEYS.up) ? 1 : 0),
+      };
+      run = this.held(KEYS.run);
+    }
+    run = run && view.canRun && !view.ghost;
+
+    state.seq += 1;
+    const input: CrowdInput = { kind: "crowd", seq: state.seq, move, run, act: state.pendingAct };
+    if (state.pendingShot && canShoot(view)) input.shoot = roundPoint(state.pendingShot);
+    state.pendingShot = undefined;
+    state.pendingAct = false;
+    state.seat.send(input);
+
+    // Only a screen with one player predicts its own figure: on a shared screen the lag would point at real players.
+    if (this.shared) return;
     const direction = snapDirection(move);
-    this.pending.push({ seq: this.seq, direction, run });
+    this.pending.push({ seq: state.seq, direction, run });
     if (this.predicted && !this.selfFrozen()) {
       const from = this.predicted.to;
       this.predicted = {
@@ -185,14 +317,36 @@ export class CrowdGame {
     }
   }
 
+  private moveCursor(state: SeatState, view: CrowdView, pad: Gamepad): void {
+    const cursor = state.cursor ?? { x: view.arena.width / 2, y: view.arena.height / 2 };
+    const left = padMove(pad);
+    const right = padAim(pad);
+    const stick = right.x !== 0 || right.y !== 0 ? right : left;
+    const step = (PAD_CURSOR_SPEED * CROWD_TICK_MS) / 1000;
+    state.cursor = {
+      x: Math.max(0, Math.min(view.arena.width, cursor.x + stick.x * step)),
+      y: Math.max(0, Math.min(view.arena.height, cursor.y + stick.y * step)),
+    };
+  }
+
+  // Controller shots fly along the right stick, or the way the figure faces if the stick is idle.
+  private padShotTarget(state: SeatState, view: CrowdView, pad: Gamepad): CrowdVector | undefined {
+    if (aimsFromAbove(view)) return state.cursor;
+    const self = this.latestFigure(view.you);
+    if (!self) return undefined;
+    const from = !this.shared && this.predicted ? this.predicted.to : self;
+    const aim = padAim(pad);
+    const angle = aim.x !== 0 || aim.y !== 0 ? Math.atan2(aim.y, aim.x) : (self.facing * Math.PI) / 4;
+    return { x: from.x + Math.cos(angle) * PAD_SHOT_REACH, y: from.y + Math.sin(angle) * PAD_SHOT_REACH };
+  }
+
   private selfFrozen(): boolean {
-    const self = this.latestSelf();
+    const self = this.view && this.latestFigure(this.view.you);
     return !self || isFrozen(self.state);
   }
 
-  private latestSelf(): Figure | undefined {
-    if (!this.view) return undefined;
-    return this.snapshots[this.snapshots.length - 1]?.figures.get(this.view.you);
+  private latestFigure(id: number): Figure | undefined {
+    return this.snapshots[this.snapshots.length - 1]?.figures.get(id);
   }
 
   // Rewind to the server's position for us, then replay the inputs it hasn't applied yet.
@@ -245,51 +399,95 @@ export class CrowdGame {
   private updateHud(): void {
     const view = this.view;
     if (!view) return;
-    const parts = [`<span data-timer></span>`, `<b>${MODE_TITLES[view.mode]}</b>`, ...this.hudLines(view)];
-    if (!view.alive) parts.push("You're down");
-    this.hud.innerHTML = parts.join(" · ");
+    const lines = this.shared ? [...sharedHudLines(view), ...this.sharedPartyLines()] : [...this.hudLines(view), ...this.partyLines(view)];
+    if (!this.shared && view.ghost) lines.push("<b>You're a ghost</b>: steer your guest");
+    else if (!this.shared && !view.alive) lines.push("<b>You're down</b>");
+    // The timer is filled in every frame by render().
+    this.hud.innerHTML =
+      `<div class="hud-top"><span class="hud-time" data-timer>${this.secondsLeft()}s</span><span class="hud-title">${MODE_TITLES[view.mode]}</span></div>` +
+      `<div class="hud-lines">${lines.map((line) => `<span>${line}</span>`).join("")}</div>`;
+  }
+
+  // Party Night extras, for a screen with one player on it.
+  private partyLines(view: CrowdView): string[] {
+    const party = view.party;
+    if (!party) return [];
+    const keys = CONTROLS[this.seats[0].seat.source.kind];
+    const lines: string[] = [];
+    if (view.role === "host") lines.push(...hostLines(party, keys));
+    if (party.contract) lines.push(`Contract: ${escapeHtml(party.contract)}${party.contractDone ? " ✓" : ""}`);
+    if (party.holdingInvite) lines.push("<b>You hold the cursed invite</b>, bump a player to pass it");
+    if (party.nemesisName) lines.push(`Nemesis: <b>${escapeHtml(party.nemesisName)}</b> (double points)`);
+    if (party.wanted) lines.push(`Wanted: the leader is ${escapeHtml(party.wanted)}`);
+    return lines;
+  }
+
+  // On a shared screen only public things show: the Wanted hint and the host's tricks (everyone knows who hosts).
+  private sharedPartyLines(): string[] {
+    const lines: string[] = [];
+    const wanted = this.seats.find((state) => state.view?.party?.wanted)?.view?.party?.wanted;
+    if (wanted) lines.push(`Wanted: the leader is ${escapeHtml(wanted)}`);
+    const host = this.seats.find((state) => state.view?.role === "host");
+    if (host?.view?.party) lines.push(...hostLines(host.view.party, CONTROLS[host.seat.source.kind]));
+    return lines;
   }
 
   private hudLines(view: CrowdView): string[] {
+    const keys = CONTROLS[this.seats[0].seat.source.kind];
+    if (view.role === "host") return [];
     const progress = `${view.hud.progress ?? 0}/${view.hud.goal ?? 0}`;
-    const shot = (aim: string) => (view.shots > 0 ? `Click to shoot ${aim} (${view.shots} left)` : "Out of shots");
+    const shot = (aim: string) => (view.shots > 0 ? `${keys.shoot} to shoot ${aim} (${view.shots} left)` : "Out of shots");
     switch (view.mode) {
       case "act_natural":
-        return ["Reach the exit first", shot("a rival"), "Shift runs, but people notice"];
+        return ["Reach the exit first", shot("a rival"), `${keys.run} runs, but people notice`];
       case "silent_witness":
         return view.role === "killer"
-          ? ["You are the <b>Killer</b>", view.canAct ? "E to strike someone close" : "Strike recharging", `Bodies ${view.hud.kills ?? 0}/${view.hud.killTarget ?? 5}`]
+          ? ["You are the <b>Killer</b>", view.canAct ? `${keys.act} to strike someone close` : "Strike recharging", `Bodies ${view.hud.kills ?? 0}/${view.hud.killTarget ?? 5}`]
           : ["You are a <b>Hunter</b>", shot("the Killer"), `Bodies ${view.hud.kills ?? 0}/${view.hud.killTarget ?? 5}`];
       case "lantern_festival":
-        return [`Lanterns ${progress}`, "E next to a lantern lights it", "E next to anyone else strikes them", "Last one standing also wins"];
+        return [`Lanterns ${progress}`, `${keys.act} next to a lantern lights it`, `${keys.act} next to anyone else strikes them`, "Last one standing also wins"];
       case "bell_ringers":
         return view.role === "ringer"
-          ? ["You are a <b>Ringer</b>", "E next to a bell rings it", `Bells ${progress}`]
+          ? ["You are a <b>Ringer</b>", `${keys.act} next to a bell rings it`, `Bells ${progress}`]
           : ["You are a <b>Lookout</b>", shot("a Ringer"), `Bells ${progress}`];
       case "heist_hour":
-        return [`Vaults ${progress}`, "E at a vault cracks it (3 different ones)", shot("a rival")];
+        return [`Vaults ${progress}`, `${keys.act} at a vault cracks it (3 different ones)`, shot("a rival")];
       case "marked":
         return [
           view.hud.markName ? `Your mark: <b>${escapeHtml(this.nameOf(view.hud.markName))}</b>` : "No mark left",
           "the red ring is roughly where they were",
           `Marks ${progress}`,
-          view.canAct ? "E strikes, but the wrong person leaves you dazed" : "Recovering",
+          view.canAct ? `${keys.act} strikes, but the wrong person leaves you dazed` : "Recovering",
         ];
       case "freeze_frame":
         return ["Reach the exit first", "When the crowd freezes, freeze with it", shot("whoever kept walking")];
       case "hot_parcel":
         return view.hud.holding
-          ? [`<b>You have the parcel!</b> ${view.hud.fuseSeconds ?? 0}s`, "E next to someone hands it over, if they're a player"]
+          ? [`<b>You have the parcel!</b> ${view.hud.fuseSeconds ?? 0}s`, `${keys.act} next to someone hands it over, if they're a player`]
           : ["Someone has the parcel", "Keep clear of anyone bumping into people", "Last one standing wins"];
       case "closing_time":
         return [
           view.alive && (view.hud.darkMs ?? 0) > 0
             ? `<b>You're in the dark!</b> ${(((view.hud.darkLimitMs ?? 0) - (view.hud.darkMs ?? 0)) / 1000).toFixed(1)}s`
             : "Stay in the light",
-          "E strikes anyone close",
+          `${keys.act} strikes anyone close`,
           "Last one standing wins",
         ];
+      case "last_dance":
+        return view.role === "backer"
+          ? ["You're backing a finalist", "Steer your guest to get in the way"]
+          : ["Hit the other finalist to win the night", shot("them"), "A miss makes nearby guests flinch", "The floor is shrinking"];
     }
+  }
+
+  // Room above the arena for the HUD. It only grows, so the arena doesn't jump as HUD lines come and go.
+  private hudSpace(): number {
+    this.hudHeight = Math.max(this.hudHeight, this.hud.offsetHeight);
+    return this.hudHeight + 20;
+  }
+
+  private secondsLeft(): number {
+    return Math.max(0, Math.ceil((this.endsAt - Date.now()) / 1000));
   }
 
   private resize(): void {
@@ -309,18 +507,22 @@ export class CrowdGame {
     const view = this.view;
     ctx.fillStyle = "#1d2321";
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    const timer = this.hud.querySelector("[data-timer]");
-    if (timer) timer.textContent = `${Math.max(0, Math.ceil((this.endsAt - Date.now()) / 1000))}s`;
+    const timer = this.hud.querySelector<HTMLElement>("[data-timer]");
+    if (timer) {
+      const seconds = this.secondsLeft();
+      timer.textContent = `${seconds}s`;
+      timer.classList.toggle("urgent", seconds <= 10 && !view?.result);
+    }
     if (!view || !this.floor) return;
 
-    this.viewport = fitArena(this.canvas.width, this.canvas.height, view.arena, 54 * (window.devicePixelRatio || 1));
+    this.viewport = fitArena(this.canvas.width, this.canvas.height, view.arena, this.hudSpace() * (window.devicePixelRatio || 1));
     ctx.save();
     ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
     ctx.scale(this.viewport.scale, this.viewport.scale);
     ctx.drawImage(this.floor, 0, 0);
 
     const figures = this.interpolated(now);
-    const self = figures.get(view.you);
+    const self = this.shared ? undefined : figures.get(view.you);
     if (self && this.predicted && !view.result) {
       const shown = this.displayedSelf(now);
       self.x = shown.x;
@@ -331,15 +533,17 @@ export class CrowdGame {
       }
     }
 
+    // On a shared screen nobody's lanterns are "theirs", so none are drawn as lit-by-you.
+    const mine = this.shared ? [] : view.mine;
     for (const prop of view.props) {
       const flaredAt = this.flares.get(prop.id);
       const flare = flaredAt === undefined ? 0 : Math.max(0, 1 - (now - flaredAt) / FLARE_EFFECT_MS);
-      drawProp(ctx, prop, view.mine.includes(prop.id), flare, now);
+      drawProp(ctx, prop, mine.includes(prop.id), flare, now);
     }
-    if (view.hud.hint && !view.result) drawHint(ctx, view.hud.hint, view.arena, now);
+    if (view.hud.hint && !view.result && !this.shared) drawHint(ctx, view.hud.hint, view.arena, now);
 
     const ordered = [...figures.values()].sort((a, b) => a.y - b.y);
-    for (const figure of ordered) drawFigure(ctx, figure, now, figure.id === view.you);
+    for (const figure of ordered) drawFigure(ctx, figure, now, figure === self);
 
     if (view.zone) drawDarkness(ctx, view.zone, view.arena);
 
@@ -362,12 +566,34 @@ export class CrowdGame {
         const label = `${this.nameOf(entry.playerId)}${suffix}`;
         drawNameTag(ctx, figure, label, color);
       }
-    } else if (self) {
-      drawNameTag(ctx, self, "You", "#e0a64a");
-    } else if (view.role === "lookout" && this.pointer) {
-      drawCrosshair(ctx, this.pointer, view.shots > 0);
+    } else {
+      if (self) drawNameTag(ctx, self, view.ghost ? "Your ghost" : "You", "#e0a64a");
+      if (!this.shared) this.drawPartyTags(ctx, view, figures);
+      this.drawCrosshairs(ctx);
     }
     ctx.restore();
+  }
+
+  // A bought glimpse, or the host's overhead view of where the players are. Never on a shared screen.
+  private drawPartyTags(ctx: CanvasRenderingContext2D, view: CrowdView, figures: Map<number, Figure>): void {
+    const party = view.party;
+    if (!party) return;
+    const glimpse = party.glimpse !== undefined ? figures.get(party.glimpse) : undefined;
+    if (glimpse) drawNameTag(ctx, glimpse, "A player", "#6ba3e9");
+    for (const id of party.players ?? []) {
+      const figure = figures.get(id);
+      if (figure) drawNameTag(ctx, figure, "Player", "#e8d26a");
+    }
+  }
+
+  // Lookouts and the host aim from above, so their crosshairs are the only thing of theirs on screen.
+  private drawCrosshairs(ctx: CanvasRenderingContext2D): void {
+    for (const state of this.seats) {
+      const view = state.view;
+      if (!view || !aimsFromAbove(view)) continue;
+      const at = state.seat.source.kind === "keyboard" ? this.pointer : state.cursor;
+      if (at) drawCrosshair(ctx, at, canShoot(view));
+    }
   }
 
   private interpolated(now: number): Map<number, Figure> {
@@ -398,6 +624,51 @@ export class CrowdGame {
     }
     return result;
   }
+}
+
+// What a shared screen can say: the goal and anything everyone can already see. Roles and secrets are felt through rumble.
+function sharedHudLines(view: CrowdView): string[] {
+  const progress = `${view.hud.progress ?? 0}/${view.hud.goal ?? 0}`;
+  const controls = "Stick moves · A acts · X shoots · RB runs";
+  switch (view.mode) {
+    case "act_natural":
+    case "freeze_frame":
+      return ["Reach the exit first", controls];
+    case "silent_witness":
+      return ["One long buzz: you're the Killer", `Bodies ${view.hud.kills ?? 0}/${view.hud.killTarget ?? 5}`, controls];
+    case "bell_ringers":
+      return ["One long buzz: you're a Ringer", "No figure? You're a Lookout", `Bells ${progress}`, controls];
+    case "lantern_festival":
+      return ["Light all five lanterns", "A buzz means you lit one", controls];
+    case "heist_hour":
+      return ["Crack three different vaults", "A buzz means you cracked one", controls];
+    case "hot_parcel":
+      return ["A heartbeat means you have the parcel", "Last one standing wins", controls];
+    case "closing_time":
+      return ["Stay in the light", "A buzz means you're in the dark", controls];
+    case "marked":
+      return ["Marked needs a private screen for each player", controls];
+    case "last_dance":
+      return ["The finalists hit each other to win the night", "Everyone else steers a guest as a ghost", controls];
+  }
+}
+
+function hostLines(party: NonNullable<CrowdView["party"]>, keys: (typeof CONTROLS)["keyboard"]): string[] {
+  const trick = TRICK_NAMES[party.trick ?? ""] ?? "Toast";
+  return [
+    "<b>Party Host</b>",
+    (party.tricksLeft ?? 0) > 0 ? `${keys.shoot} plays <b>${trick}</b> (${party.tricksLeft} left)` : "Out of tricks",
+    `${keys.act} changes trick`,
+  ];
+}
+
+// The host plays tricks the way a Lookout shoots: at a spot, from above.
+function aimsFromAbove(view: CrowdView): boolean {
+  return view.role === "lookout" || view.role === "host";
+}
+
+function canShoot(view: CrowdView): boolean {
+  return view.role === "host" ? (view.party?.tricksLeft ?? 0) > 0 : view.shots > 0;
 }
 
 function isFrozen(state: CrowdEntityState): boolean {

@@ -3,10 +3,21 @@
 
 export type CrowdVector = { x: number; y: number };
 
-export type CrowdModeId = "act_natural" | "silent_witness" | "lantern_festival" | "bell_ringers" | "heist_hour" | "marked" | "freeze_frame" | "hot_parcel" | "closing_time";
+export type CrowdModeId =
+  | "act_natural"
+  | "silent_witness"
+  | "lantern_festival"
+  | "bell_ringers"
+  | "heist_hour"
+  | "marked"
+  | "freeze_frame"
+  | "hot_parcel"
+  | "closing_time"
+  | "last_dance";
 
 // "lookout" watches from above and has no figure in the crowd.
-export type CrowdRole = "runner" | "killer" | "hunter" | "ringer" | "lookout";
+// "backer" is a Last Dance spectator steering a ghost; "host" is Party Night's trickster, watching from above.
+export type CrowdRole = "runner" | "killer" | "hunter" | "ringer" | "lookout" | "backer" | "host";
 
 export type CrowdInput = {
   kind: "crowd";
@@ -71,7 +82,9 @@ export type CrowdView = {
   arena: { width: number; height: number; exitX?: number };
   tick: number;
   // Your own entity id (0 for a lookout, who has none) and the last input seq the server applied for you.
+  // While you're a ghost it's the NPC you're steering.
   you: number;
+  ghost?: boolean;
   ack: number;
   role: CrowdRole;
   alive: boolean;
@@ -102,4 +115,22 @@ export type CrowdView = {
     darkLimitMs?: number;
   };
   result?: CrowdResult;
+  // Party Night extras for this player. Everything in here is either public or this player's own.
+  party?: CrowdPartyView;
+};
+
+export type CrowdPartyView = {
+  contract?: string;
+  contractDone?: boolean;
+  holdingInvite?: boolean;
+  // A purchased glimpse: one real player's entity, shown to you briefly.
+  glimpse?: number;
+  // Public: the leader's rough whereabouts.
+  wanted?: string;
+  nemesisName?: string;
+  // The Party Host's tools.
+  trick?: string;
+  tricksLeft?: number;
+  // Host's overhead view online: where the players are.
+  players?: number[];
 };

@@ -6,6 +6,7 @@ import {
   crowdFreezeFrame,
   crowdHeistHour,
   crowdHotParcel,
+  crowdLastDance,
   crowdLanternFestival,
   crowdMarked,
   crowdSilentWitness,
@@ -45,3 +46,4 @@ registerMinigame(crowdMarked);
 registerMinigame(crowdFreezeFrame);
 registerMinigame(crowdHotParcel);
 registerMinigame(crowdClosingTime);
+registerMinigame(crowdLastDance);

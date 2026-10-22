@@ -1,5 +1,5 @@
 import type { CrowdInput, CrowdView } from "../crowd/protocol.js";
-import type { NightSnapshot } from "../party/night.js";
+import type { NightOptions, NightSnapshot, PerkKey } from "../party/night.js";
 
 export const MESSAGE_TYPES = {
   CREATE_ROOM: "CREATE_ROOM",
@@ -15,6 +15,7 @@ export const MESSAGE_TYPES = {
   START_NIGHT: "START_NIGHT",
   PICK_ROOM: "PICK_ROOM",
   NEXT_ROUND: "NEXT_ROUND",
+  NIGHT_ACTION: "NIGHT_ACTION",
   ERROR: "ERROR",
 } as const;
 
@@ -28,8 +29,8 @@ export type PlayerSnapshot = {
   score: number;
 };
 
-// "board" and "night_over" only happen during a Party Night.
-export type RoomPhase = "lobby" | "board" | "in_game" | "results" | "night_over";
+// Everything but "lobby", "in_game" and "results" only happens during a Party Night.
+export type RoomPhase = "lobby" | "board" | "in_game" | "results" | "shop" | "mole_vote" | "finale_pick" | "night_over";
 
 export type RoomSnapshot = {
   code: string;
@@ -348,9 +349,18 @@ export type ClientMessage =
   | { type: "PLAYER_INPUT"; input: PlayerInputPayload }
   | { type: "RETURN_TO_LOBBY" }
   // sharedScreen: everyone is watching one screen, so rooms that need secret words are left out.
-  | { type: "START_NIGHT"; rounds: number; sharedScreen: boolean }
+  | { type: "START_NIGHT"; rounds: number; sharedScreen: boolean; options?: Partial<NightOptions> }
   | { type: "PICK_ROOM"; roomKey: string }
-  | { type: "NEXT_ROUND" };
+  | { type: "NEXT_ROUND" }
+  | { type: "NIGHT_ACTION"; action: NightAction };
+
+// Between rounds: shopping, the Mole vote, backing a finalist. "skip" lets the host move on without stragglers.
+export type NightAction =
+  | { kind: "buy"; perk: PerkKey }
+  | { kind: "done" }
+  | { kind: "vote"; playerId: string }
+  | { kind: "back"; playerId: string }
+  | { kind: "skip" };
 
 export type ServerMessage =
   | { type: "ROOM_STATE"; room: RoomSnapshot; playerId: string }

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ROOM_CODE_LENGTH } from "../../../shared/constants/platform.js";
 import type { ClientMessage } from "../../../shared/message-types/protocol.js";
-import { crowdMatchFor } from "../minigames/CrowdGames.js";
+import { LAST_DANCE_ID, crowdMatchFor } from "../minigames/CrowdGames.js";
 import type { Minigame } from "../minigames/Minigame.js";
 import { getMinigame } from "../minigames/registry.js";
 import { PartyNight } from "../party/PartyNight.js";
@@ -69,7 +69,7 @@ export class RoomManager {
 
     if (message.type === "START_GAME") {
       const minigameId = message.minigameId ?? room.selectedMinigameId;
-      const minigame = getMinigame(minigameId);
+      const minigame = minigameId === LAST_DANCE_ID ? undefined : getMinigame(minigameId);
       if (!minigame) throw new Error("Unknown minigame.");
       if (!room.canStart(playerId, minigame)) throw new Error("Only the host can start when all players are ready.");
       room.start(minigame, () => onGameFinished(room), () => onGameTick?.(room));
@@ -92,7 +92,13 @@ export class RoomManager {
 
     if (message.type === "START_NIGHT") {
       if (!room.everyoneReadyForHost(playerId)) throw new Error("Only the host can start when all players are ready.");
-      room.night = new PartyNight(room.players.map((player) => player.id), message.rounds, message.sharedScreen, this.random);
+      room.night = new PartyNight(
+        room.players.map((player) => player.id),
+        message.rounds,
+        message.sharedScreen,
+        this.random,
+        message.options,
+      );
       room.phase = "board";
       room.game = undefined;
       return room;
@@ -114,6 +120,26 @@ export class RoomManager {
       return room;
     }
 
+    if (message.type === "NIGHT_ACTION") {
+      const night = room.night;
+      if (!night) throw new Error("There's no Party Night running.");
+      const action = message.action;
+      const isHost = room.hostId === playerId;
+      if (room.phase === "shop") {
+        if (action.kind === "buy") night.buy(playerId, action.perk);
+        if ((action.kind === "done" && night.finishShopping(playerId)) || (action.kind === "skip" && isHost)) room.phase = "board";
+      } else if (room.phase === "mole_vote") {
+        if ((action.kind === "vote" && night.voteMole(playerId, action.playerId)) || (action.kind === "skip" && isHost)) room.phase = night.revealMole();
+      } else if (room.phase === "finale_pick") {
+        if ((action.kind === "back" && night.back(playerId, action.playerId)) || (action.kind === "skip" && isHost)) {
+          this.startFinale(room, onGameFinished, onGameTick);
+        }
+      } else {
+        throw new Error("Nothing to do right now.");
+      }
+      return room;
+    }
+
     return room;
   }
 
@@ -125,10 +151,16 @@ export class RoomManager {
 
   private finish(room: Room, minigame: Minigame): void {
     room.finish(minigame);
-    if (!room.night?.current) return;
+    const night = room.night;
+    if (!night || (!night.current && !night.inFinale)) return;
     const match = crowdMatchFor(room);
-    if (match) room.night.recordRound(scoreCrowdRound(match));
-    else room.night.skipRound();
+    if (match) night.recordRound(scoreCrowdRound(match), match);
+    else night.skipRound();
+  }
+
+  private startFinale(room: Room, onGameFinished: (room: Room) => void, onGameTick?: (room: Room) => void): void {
+    room.night!.startFinale();
+    room.start(getMinigame(LAST_DANCE_ID)!, () => onGameFinished(room), () => onGameTick?.(room));
   }
 
   private mustFindRoom(code: string): Room {

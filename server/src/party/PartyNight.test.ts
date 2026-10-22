@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MANSION_ROOMS, NIGHT_POINTS } from "../../../shared/party/night.js";
+import { MANSION_ROOMS, NIGHT_LAYERS, NIGHT_POINTS, type NightOptions } from "../../../shared/party/night.js";
 import { CrowdMatch } from "../crowd/CrowdMatch.js";
 import { actNaturalRules, silentWitnessRules } from "../crowd/modes.js";
 import { seededRandom } from "../crowd/random.js";
@@ -8,6 +8,8 @@ import { setCrowdRandomForTests } from "../minigames/CrowdGames.js";
 import { RoomManager } from "../rooms/RoomManager.js";
 import { PartyNight } from "./PartyNight.js";
 import { scoreCrowdRound } from "./scoring.js";
+
+const NO_LAYERS = Object.fromEntries(NIGHT_LAYERS.map((layer) => [layer.key, false])) as NightOptions;
 
 let seed = 100;
 setCrowdRandomForTests(() => seededRandom(seed++));
@@ -50,12 +52,12 @@ test("shooting your own side doesn't score, and a tied team win goes to one of t
 
 test("last place picks from three unplayed rooms", () => {
   const night = new PartyNight(["a", "b", "c"], 6, false, seededRandom(3));
-  assert.equal(night.options.length, 3);
-  night.pick(night.options[0]);
+  assert.equal(night.offered.length, 3);
+  night.pick(night.offered[0]);
   night.recordRound({ points: new Map([["a", 5], ["b", 0], ["c", 2]]), claimant: "a" });
   assert.equal(night.pickerId, "b");
-  assert.equal(night.options.length, 3);
-  assert.ok(night.options.every((key) => !night.played.includes(key)));
+  assert.equal(night.offered.length, 3);
+  assert.ok(night.offered.every((key) => !night.played.includes(key)));
   assert.throws(() => night.pick(night.played[0]));
 });
 
@@ -63,8 +65,8 @@ test("a shared screen leaves out rooms that need secret words", () => {
   const night = new PartyNight(["a", "b"], 8, true, seededRandom(4));
   const keys = new Set<string>();
   while (!night.over) {
-    night.options.forEach((key) => keys.add(key));
-    night.pick(night.options[0]);
+    night.offered.forEach((key) => keys.add(key));
+    night.pick(night.offered[0]);
     night.skipRound();
   }
   assert.equal(night.totalRounds, 8);
@@ -84,15 +86,15 @@ test("final standings add claimed rooms and connected pairs", () => {
   assert.equal(second.total, 12 + 2);
 });
 
-test("a night runs from the lobby through every round to the final standings", () => {
+test("a plain night runs from the lobby through every round to the final standings", () => {
   const manager = new RoomManager(seededRandom(6));
   const { room, player: host } = manager.createRoom("Host");
   const { player: guest } = manager.joinRoom(room.code, "Guest");
   const finished = () => manager.finishGame(room);
 
-  assert.throws(() => manager.handleRoomMessage(host.id, { type: "START_NIGHT", rounds: 4, sharedScreen: false }, finished));
+  assert.throws(() => manager.handleRoomMessage(host.id, { type: "START_NIGHT", rounds: 4, sharedScreen: false, options: NO_LAYERS }, finished));
   manager.handleRoomMessage(guest.id, { type: "PLAYER_READY", isReady: true }, finished);
-  manager.handleRoomMessage(host.id, { type: "START_NIGHT", rounds: 4, sharedScreen: false }, finished);
+  manager.handleRoomMessage(host.id, { type: "START_NIGHT", rounds: 4, sharedScreen: false, options: NO_LAYERS }, finished);
   assert.equal(room.phase, "board");
 
   for (let round = 1; round <= 4; round += 1) {
@@ -100,9 +102,9 @@ test("a night runs from the lobby through every round to the final standings", (
     const outsider = night.pickerId === host.id ? undefined : host.id;
     const picker = night.pickerId!;
     if (!outsider && picker !== guest.id) {
-      assert.throws(() => manager.handleRoomMessage(guest.id, { type: "PICK_ROOM", roomKey: night.options[0] }, finished));
+      assert.throws(() => manager.handleRoomMessage(guest.id, { type: "PICK_ROOM", roomKey: night.offered[0] }, finished));
     }
-    manager.handleRoomMessage(picker, { type: "PICK_ROOM", roomKey: night.options[0] }, finished);
+    manager.handleRoomMessage(picker, { type: "PICK_ROOM", roomKey: night.offered[0] }, finished);
     assert.equal(room.phase, "in_game");
     manager.finishGame(room);
     assert.equal(room.phase, "results");

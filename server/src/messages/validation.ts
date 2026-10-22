@@ -1,5 +1,6 @@
 import type { ClientMessage, PlayerInputPayload } from "../../../shared/message-types/protocol.js";
-import { NIGHT_LENGTHS, type NightLength } from "../../../shared/party/night.js";
+import { NIGHT_LAYERS, NIGHT_LENGTHS, PERKS, type NightLength, type NightOptions, type PerkKey } from "../../../shared/party/night.js";
+import type { NightAction } from "../../../shared/message-types/protocol.js";
 
 const MAX_NAME_LENGTH = 24;
 
@@ -37,12 +38,14 @@ export function parseClientMessage(raw: unknown): ClientMessage {
     case "START_NIGHT":
       if (!NIGHT_LENGTHS.includes(message.rounds as NightLength)) throw new Error(`rounds must be one of ${NIGHT_LENGTHS.join(", ")}.`);
       if (typeof message.sharedScreen !== "boolean") throw new Error("sharedScreen must be a boolean.");
-      return { type: "START_NIGHT", rounds: message.rounds as NightLength, sharedScreen: message.sharedScreen };
+      return { type: "START_NIGHT", rounds: message.rounds as NightLength, sharedScreen: message.sharedScreen, options: readNightOptions(message.options) };
     case "PICK_ROOM":
       if (typeof message.roomKey !== "string") throw new Error("roomKey must be a string.");
       return { type: "PICK_ROOM", roomKey: message.roomKey };
     case "NEXT_ROUND":
       return { type: "NEXT_ROUND" };
+    case "NIGHT_ACTION":
+      return { type: "NIGHT_ACTION", action: readNightAction(message.action) };
     default:
       throw new Error("Unknown message type.");
   }
@@ -86,6 +89,34 @@ function readPlayerInput(value: unknown): PlayerInputPayload {
     run: input.run === true,
     kill: input.kill === true,
   };
+}
+
+function readNightOptions(value: unknown): Partial<NightOptions> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object") throw new Error("options must be an object.");
+  const raw = value as Record<string, unknown>;
+  const options: Partial<NightOptions> = {};
+  for (const layer of NIGHT_LAYERS) if (typeof raw[layer.key] === "boolean") options[layer.key] = raw[layer.key] as boolean;
+  return options;
+}
+
+function readNightAction(value: unknown): NightAction {
+  if (!value || typeof value !== "object") throw new Error("action must be an object.");
+  const action = value as Record<string, unknown>;
+  switch (action.kind) {
+    case "buy":
+      if (!PERKS.some((perk) => perk.key === action.perk)) throw new Error("Unknown perk.");
+      return { kind: "buy", perk: action.perk as PerkKey };
+    case "vote":
+    case "back":
+      if (typeof action.playerId !== "string") throw new Error("playerId must be a string.");
+      return { kind: action.kind, playerId: action.playerId };
+    case "done":
+    case "skip":
+      return { kind: action.kind };
+    default:
+      throw new Error("Unknown night action.");
+  }
 }
 
 function readSequence(value: unknown): number | undefined {

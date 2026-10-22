@@ -119,11 +119,11 @@ export const silentWitnessRules: CrowdRules = {
 
 const witnessKills = new WeakMap<CrowdMatch, number>();
 
-const PLAZA = { width: 1280, height: 720 };
+export const PLAZA = { width: 1280, height: 720 };
 const PROP_REACH = 40;
 const STRIKE_RANGE = 30;
 
-const anywhere = (random: Random, arena: CrowdArena): CrowdVector => ({
+export const anywhere = (random: Random, arena: CrowdArena): CrowdVector => ({
   x: Math.round(60 + random() * (arena.width - 120)),
   y: Math.round(80 + random() * (arena.height - 140)),
 });
@@ -594,7 +594,7 @@ function mostProgress(match: CrowdMatch, score: (slot: CrowdSlot) => number): Cr
   return { winner: "player", winnerPlayerId: first.playerId, reveal: [] };
 }
 
-function wander(entity: CrowdEntity, random: Random, arena: CrowdArena) {
+export function wander(entity: CrowdEntity, random: Random, arena: CrowdArena) {
   if (random() < 0.3) return { direction: STILL, durationMs: between(random, 600, 2600) };
   const direction = ALL_DIRECTIONS[Math.floor(random() * ALL_DIRECTIONS.length)];
   return { direction: awayFromEdges(entity, direction, arena), durationMs: between(random, 600, 2600) };

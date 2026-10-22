@@ -122,7 +122,7 @@ function broadcastRoom(room?: Room): void {
     const socket = sockets.get(player.id);
     if (!socket) continue;
     const game = gameFor(room, player.id, snapshot.game);
-    send(socket, { type: MESSAGE_TYPES.ROOM_STATE, room: { ...snapshot, game }, playerId: player.id });
+    send(socket, { type: MESSAGE_TYPES.ROOM_STATE, room: { ...snapshot, game, night: room.nightFor(player.id) }, playerId: player.id });
     if (game) send(socket, { type: MESSAGE_TYPES.GAME_STATE, game });
   }
 }

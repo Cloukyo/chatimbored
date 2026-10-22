@@ -97,12 +97,17 @@ export class Room {
     this.night = undefined;
   }
 
-  // After a Party Night round: back to the board, or on to the final standings.
+  // After a Party Night round: the shop, the board, the Mole vote, the finale or the final standings.
   continueNight(): void {
     if (!this.night || this.phase !== "results") return;
     this.clearTimer();
     this.game = undefined;
-    this.phase = this.night.over ? "night_over" : "board";
+    this.phase = this.night.afterResults();
+  }
+
+  // The night as one player may see it: public, plus their own secrets.
+  nightFor(playerId: string): RoomSnapshot["night"] {
+    return this.night?.snapshotFor(playerId, this.phase === "night_over");
   }
 
   snapshot(): RoomSnapshot {
@@ -113,7 +118,7 @@ export class Room {
       selectedMinigameId: this.selectedMinigameId,
       players: this.players.map((player) => ({ ...player })),
       game: this.game ? { ...this.game, scores: { ...this.game.scores } } : undefined,
-      night: this.night?.snapshot(),
+      night: this.nightFor(""),
     };
   }
 

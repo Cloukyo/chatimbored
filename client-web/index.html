@@ -29,7 +29,23 @@
           </div>
         </header>
         <ul id="players" class="players"></ul>
-        <h3>Game</h3>
+        <div id="couch" class="couch">
+          <p id="couch-hint" class="muted">Playing on one screen? Press <b>A</b> on each extra controller to add a player.</p>
+          <button id="claim-pad" class="ghost">Play with a controller myself</button>
+        </div>
+        <h3>Party Night</h3>
+        <p class="muted">A night at the mansion: rounds in different rooms, points for every round, last place picks the next room, and each winner claims the room they won.</p>
+        <div class="row">
+          <label class="inline">Rounds
+            <select id="night-length">
+              <option value="4">4 (short)</option>
+              <option value="6" selected>6</option>
+              <option value="8">8 (long)</option>
+            </select>
+          </label>
+          <button id="start-night" class="primary">Start Party Night</button>
+        </div>
+        <h3>Or play one game</h3>
         <div id="modes" class="modes"></div>
         <div class="row">
           <button id="ready">Ready</button>
@@ -38,12 +54,34 @@
         <p id="lobby-status" class="status" role="status"></p>
       </section>
 
+      <section id="board" class="screen card wide" hidden>
+        <header class="row spread">
+          <h2 id="board-title">Party Night</h2>
+          <button id="end-night" class="ghost">End night</button>
+        </header>
+        <div id="mansion" class="mansion"></div>
+        <p id="board-status" class="status" role="status"></p>
+        <ol id="scoreboard" class="players scoreboard"></ol>
+      </section>
+
+      <section id="night-over" class="screen card wide" hidden>
+        <h2 id="night-over-title"></h2>
+        <table class="standings">
+          <thead><tr><th>Player</th><th>Points</th><th>Rooms</th><th>Connected</th><th>Total</th></tr></thead>
+          <tbody id="standings"></tbody>
+        </table>
+        <p class="muted">Each claimed room is worth 2 points, plus 1 for each pair of your rooms that share a wall.</p>
+        <button id="night-to-lobby" class="primary">Back to lobby</button>
+        <p id="night-over-wait" class="muted">Waiting for the host.</p>
+      </section>
+
       <section id="game" class="screen game" hidden>
         <canvas id="arena"></canvas>
         <div id="hud" class="hud"></div>
         <div id="results" class="results card" hidden>
           <h2 id="results-title"></h2>
           <ul id="reveal" class="players"></ul>
+          <button id="next-round" class="primary">Next</button>
           <button id="back-to-lobby" class="primary">Back to lobby</button>
           <p id="results-wait" class="muted">Waiting for the host to head back to the lobby.</p>
         </div>

@@ -1,13 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { ROOM_CODE_LENGTH } from "../../../shared/constants/platform.js";
 import type { ClientMessage } from "../../../shared/message-types/protocol.js";
+import { crowdMatchFor } from "../minigames/CrowdGames.js";
+import type { Minigame } from "../minigames/Minigame.js";
 import { getMinigame } from "../minigames/registry.js";
+import { PartyNight } from "../party/PartyNight.js";
+import { scoreCrowdRound } from "../party/scoring.js";
 import type { Player } from "./Player.js";
 import { Room } from "./Room.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 export class RoomManager {
+  // Tests can pass a seeded generator so room offers and pickers are repeatable.
+  constructor(private readonly random: () => number = Math.random) {}
+
   private readonly rooms = new Map<string, Room>();
   private readonly playerRooms = new Map<string, string>();
 
@@ -33,8 +40,9 @@ export class RoomManager {
     if (!room) return undefined;
     const minigame = room.phase === "in_game" ? getMinigame(room.selectedMinigameId) : undefined;
     room.removePlayer(playerId);
+    room.night?.removePlayer(playerId);
     minigame?.onPlayerLeft?.(room, playerId);
-    if (room.game?.winnerId && room.phase === "in_game" && minigame) room.finish(minigame);
+    if (room.game?.winnerId && room.phase === "in_game" && minigame) this.finish(room, minigame);
     this.playerRooms.delete(playerId);
     if (room.players.length === 0) this.rooms.delete(room.code);
     return room;
@@ -77,7 +85,32 @@ export class RoomManager {
     }
 
     if (message.type === "RETURN_TO_LOBBY") {
-      if (room.phase === "results" && room.hostId === playerId) room.returnToLobby();
+      // During a night this ends it early.
+      if (room.phase !== "lobby" && room.phase !== "in_game" && room.hostId === playerId) room.returnToLobby();
+      return room;
+    }
+
+    if (message.type === "START_NIGHT") {
+      if (!room.everyoneReadyForHost(playerId)) throw new Error("Only the host can start when all players are ready.");
+      room.night = new PartyNight(room.players.map((player) => player.id), message.rounds, message.sharedScreen, this.random);
+      room.phase = "board";
+      room.game = undefined;
+      return room;
+    }
+
+    if (message.type === "PICK_ROOM") {
+      const night = room.night;
+      if (!night || room.phase !== "board") throw new Error("Nothing to pick right now.");
+      if (!night.canPick(playerId, room.hostId === playerId)) throw new Error("It's someone else's pick.");
+      if (room.players.length < 2) throw new Error("A round needs at least 2 players.");
+      const minigame = getMinigame(night.pick(message.roomKey).minigameId);
+      if (!minigame) throw new Error("Unknown minigame.");
+      room.start(minigame, () => onGameFinished(room), () => onGameTick?.(room));
+      return room;
+    }
+
+    if (message.type === "NEXT_ROUND") {
+      if (room.phase === "results" && room.hostId === playerId) room.continueNight();
       return room;
     }
 
@@ -87,7 +120,15 @@ export class RoomManager {
   finishGame(room: Room): void {
     const minigame = getMinigame(room.selectedMinigameId);
     if (!minigame || room.phase !== "in_game") return;
+    this.finish(room, minigame);
+  }
+
+  private finish(room: Room, minigame: Minigame): void {
     room.finish(minigame);
+    if (!room.night?.current) return;
+    const match = crowdMatchFor(room);
+    if (match) room.night.recordRound(scoreCrowdRound(match));
+    else room.night.skipRound();
   }
 
   private mustFindRoom(code: string): Room {

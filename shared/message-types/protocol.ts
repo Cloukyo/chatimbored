@@ -1,4 +1,5 @@
 import type { CrowdInput, CrowdView } from "../crowd/protocol.js";
+import type { NightSnapshot } from "../party/night.js";
 
 export const MESSAGE_TYPES = {
   CREATE_ROOM: "CREATE_ROOM",
@@ -11,6 +12,9 @@ export const MESSAGE_TYPES = {
   GAME_STATE: "GAME_STATE",
   GAME_OVER: "GAME_OVER",
   RETURN_TO_LOBBY: "RETURN_TO_LOBBY",
+  START_NIGHT: "START_NIGHT",
+  PICK_ROOM: "PICK_ROOM",
+  NEXT_ROUND: "NEXT_ROUND",
   ERROR: "ERROR",
 } as const;
 
@@ -24,7 +28,8 @@ export type PlayerSnapshot = {
   score: number;
 };
 
-export type RoomPhase = "lobby" | "in_game" | "results";
+// "board" and "night_over" only happen during a Party Night.
+export type RoomPhase = "lobby" | "board" | "in_game" | "results" | "night_over";
 
 export type RoomSnapshot = {
   code: string;
@@ -33,6 +38,7 @@ export type RoomSnapshot = {
   selectedMinigameId: string;
   players: PlayerSnapshot[];
   game?: GameSnapshot;
+  night?: NightSnapshot;
 };
 
 export type GameSnapshot = {
@@ -340,7 +346,11 @@ export type ClientMessage =
   | { type: "PLAYER_READY"; isReady: boolean }
   | { type: "START_GAME"; minigameId?: string }
   | { type: "PLAYER_INPUT"; input: PlayerInputPayload }
-  | { type: "RETURN_TO_LOBBY" };
+  | { type: "RETURN_TO_LOBBY" }
+  // sharedScreen: everyone is watching one screen, so rooms that need secret words are left out.
+  | { type: "START_NIGHT"; rounds: number; sharedScreen: boolean }
+  | { type: "PICK_ROOM"; roomKey: string }
+  | { type: "NEXT_ROUND" };
 
 export type ServerMessage =
   | { type: "ROOM_STATE"; room: RoomSnapshot; playerId: string }

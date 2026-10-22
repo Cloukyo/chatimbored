@@ -1,6 +1,7 @@
 import { ACT_NATURAL_TICK_MS, DEFAULT_MINIGAME_ID, MAX_PLAYERS, MIN_PLAYERS } from "../../../shared/constants/platform.js";
 import type { GameSnapshot, RoomSnapshot } from "../../../shared/message-types/protocol.js";
 import type { Minigame } from "../minigames/Minigame.js";
+import type { PartyNight } from "../party/PartyNight.js";
 import type { Player } from "./Player.js";
 
 export class Room {
@@ -9,6 +10,7 @@ export class Room {
   selectedMinigameId = DEFAULT_MINIGAME_ID;
   phase: RoomSnapshot["phase"] = "lobby";
   game?: GameSnapshot;
+  night?: PartyNight;
   private endTimer?: NodeJS.Timeout;
   private tickTimer?: NodeJS.Timeout;
   private lastTickAt = 0;
@@ -45,13 +47,20 @@ export class Room {
   }
 
   canStart(playerId: string, minigame: Minigame): boolean {
+    return (
+      this.everyoneReadyForHost(playerId) &&
+      this.players.length >= minigame.minPlayers &&
+      this.players.length <= minigame.maxPlayers
+    );
+  }
+
+  // Lobby, asked by the host, enough players, and everyone else ready.
+  everyoneReadyForHost(playerId: string): boolean {
     const readyCount = this.players.filter((player) => player.isReady || player.isHost).length;
     return (
       this.hostId === playerId &&
       this.phase === "lobby" &&
       this.players.length >= MIN_PLAYERS &&
-      this.players.length >= minigame.minPlayers &&
-      this.players.length <= minigame.maxPlayers &&
       readyCount === this.players.length
     );
   }
@@ -85,6 +94,15 @@ export class Room {
     this.clearTimer();
     this.phase = "lobby";
     this.game = undefined;
+    this.night = undefined;
+  }
+
+  // After a Party Night round: back to the board, or on to the final standings.
+  continueNight(): void {
+    if (!this.night || this.phase !== "results") return;
+    this.clearTimer();
+    this.game = undefined;
+    this.phase = this.night.over ? "night_over" : "board";
   }
 
   snapshot(): RoomSnapshot {
@@ -95,6 +113,7 @@ export class Room {
       selectedMinigameId: this.selectedMinigameId,
       players: this.players.map((player) => ({ ...player })),
       game: this.game ? { ...this.game, scores: { ...this.game.scores } } : undefined,
+      night: this.night?.snapshot(),
     };
   }
 

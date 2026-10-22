@@ -243,3 +243,115 @@ button.ghost {
   border-radius: 8px;
   max-width: calc(100% - 32px);
 }
+
+select {
+  font: inherit;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-edge);
+  background: var(--bg);
+  color: var(--text);
+}
+
+label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: -0.05em;
+}
+
+.couch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mansion {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.room {
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  min-height: 92px;
+  border-width: 2px;
+  background: var(--bg);
+}
+
+.room strong {
+  font-size: 17px;
+}
+
+.room .muted {
+  font-size: 13px;
+}
+
+.room.played {
+  opacity: 0.55;
+}
+
+.room.offered {
+  border-color: var(--accent);
+  background: #3a3524;
+}
+
+.room.focused {
+  box-shadow: 0 0 0 3px var(--text);
+}
+
+.room .owner {
+  font-size: 13px;
+  margin-top: auto;
+}
+
+.scoreboard li b {
+  color: var(--accent);
+}
+
+.standings {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.standings th,
+.standings td {
+  text-align: right;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--panel-edge);
+}
+
+.standings th:first-child,
+.standings td:first-child {
+  text-align: left;
+}
+
+.standings tbody tr:first-child td {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+@media (max-width: 520px) {
+  .room {
+    min-height: 76px;
+    padding: 8px;
+  }
+
+  .room strong {
+    font-size: 15px;
+  }
+}

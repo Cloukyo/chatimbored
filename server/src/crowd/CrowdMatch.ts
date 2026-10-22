@@ -51,6 +51,8 @@ export type CrowdSlot = {
   lastRun: boolean;
   ack: number;
   connected: boolean;
+  // Other players this player took down with a shot or a strike, for scoring across rounds.
+  takedowns: string[];
 };
 
 export type CrowdRules = {
@@ -94,6 +96,8 @@ export class CrowdMatch {
   private nextEventId = 1;
   private packedTick = -1;
   private packed: number[] = [];
+  // Whoever's shot or strike is being resolved, so a death can be credited to them.
+  private actor?: CrowdSlot;
 
   constructor(
     readonly rules: CrowdRules,
@@ -143,6 +147,7 @@ export class CrowdMatch {
         lastRun: false,
         ack: 0,
         connected: true,
+        takedowns: [],
       });
     }
   }
@@ -192,7 +197,7 @@ export class CrowdMatch {
       if (!input) continue;
       if (input.shoot && slot.shots > 0) this.shoot(slot, input.shoot);
       if (this.result) return;
-      if (input.act && slot.actCooldownMs <= 0) this.rules.onAct?.(this, slot);
+      if (input.act && slot.actCooldownMs <= 0) this.withActor(slot, () => this.rules.onAct?.(this, slot));
     }
 
     for (const entity of this.entities) {
@@ -294,6 +299,8 @@ export class CrowdMatch {
     entity.direction = { x: 0, y: 0 };
     entity.running = false;
     this.emit({ type: "down", entity: entity.id });
+    const victim = this.slotForEntity(entity);
+    if (victim && this.actor && victim !== this.actor) this.actor.takedowns.push(victim.playerId);
     this.rules.onEntityDied?.(this, entity, cause);
   }
 
@@ -324,6 +331,15 @@ export class CrowdMatch {
       hud: this.rules.hud?.(this, slot) ?? {},
       result: this.result ? { ...this.result, reveal: this.reveal() } : undefined,
     };
+  }
+
+  private withActor(slot: CrowdSlot, resolve: () => void): void {
+    this.actor = slot;
+    try {
+      resolve();
+    } finally {
+      this.actor = undefined;
+    }
   }
 
   private reveal(): CrowdResult["reveal"] {
@@ -366,7 +382,7 @@ export class CrowdMatch {
       if (hit && (!best || hit.distance < best.distance)) best = { entity, ...hit };
     }
     this.emit({ type: "shot", from, to: best?.point ?? end });
-    if (best) this.rules.onShotHit(this, slot, best.entity);
+    if (best) this.withActor(slot, () => this.rules.onShotHit(this, slot, best!.entity));
   }
 
   // An arrow from above: drops on the clicked point and hits the closest body under it.
@@ -379,7 +395,7 @@ export class CrowdMatch {
     }
     const to = best ? { x: best.entity.x, y: best.entity.y } : { x: target.x, y: target.y + BODY_HEIGHT };
     this.emit({ type: "shot", from: { x: to.x - 60, y: -40 }, to });
-    if (best) this.rules.onShotHit(this, slot, best.entity);
+    if (best) this.withActor(slot, () => this.rules.onShotHit(this, slot, best!.entity));
   }
 }
 

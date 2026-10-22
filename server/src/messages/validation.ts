@@ -1,4 +1,5 @@
 import type { ClientMessage, PlayerInputPayload } from "../../../shared/message-types/protocol.js";
+import { NIGHT_LENGTHS, type NightLength } from "../../../shared/party/night.js";
 
 const MAX_NAME_LENGTH = 24;
 
@@ -33,6 +34,15 @@ export function parseClientMessage(raw: unknown): ClientMessage {
       return { type: "PLAYER_INPUT", input: readPlayerInput(message.input) };
     case "RETURN_TO_LOBBY":
       return { type: "RETURN_TO_LOBBY" };
+    case "START_NIGHT":
+      if (!NIGHT_LENGTHS.includes(message.rounds as NightLength)) throw new Error(`rounds must be one of ${NIGHT_LENGTHS.join(", ")}.`);
+      if (typeof message.sharedScreen !== "boolean") throw new Error("sharedScreen must be a boolean.");
+      return { type: "START_NIGHT", rounds: message.rounds as NightLength, sharedScreen: message.sharedScreen };
+    case "PICK_ROOM":
+      if (typeof message.roomKey !== "string") throw new Error("roomKey must be a string.");
+      return { type: "PICK_ROOM", roomKey: message.roomKey };
+    case "NEXT_ROUND":
+      return { type: "NEXT_ROUND" };
     default:
       throw new Error("Unknown message type.");
   }

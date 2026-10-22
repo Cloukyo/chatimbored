@@ -293,7 +293,8 @@ export class CrowdGame {
     }
     run = run && view.canRun && !view.ghost;
 
-    state.seq += 1;
+    // After a reconnect the server has already seen higher numbers than this fresh page.
+    state.seq = Math.max(state.seq, view.ack) + 1;
     const input: CrowdInput = { kind: "crowd", seq: state.seq, move, run, act: state.pendingAct };
     if (state.pendingShot && canShoot(view)) input.shoot = roundPoint(state.pendingShot);
     state.pendingShot = undefined;

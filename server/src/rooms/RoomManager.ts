@@ -17,6 +17,9 @@ export class RoomManager {
 
   private readonly rooms = new Map<string, Room>();
   private readonly playerRooms = new Map<string, string>();
+  // Secret per player: whoever holds it can take the seat back after a dropped connection.
+  private readonly resumeTokens = new Map<string, string>();
+  private readonly tokenOwners = new Map<string, string>();
 
   createRoom(displayName: string): { room: Room; player: Player } {
     const room = new Room(this.createRoomCode());
@@ -35,7 +38,47 @@ export class RoomManager {
     return { room, player };
   }
 
+  resumeTokenFor(playerId: string): string | undefined {
+    return this.resumeTokens.get(playerId);
+  }
+
+  // The connection dropped: keep the seat, and let the player's figure blend into the crowd meanwhile.
+  disconnect(playerId: string): Room | undefined {
+    const room = this.getRoomForPlayer(playerId);
+    const player = room?.players.find((candidate) => candidate.id === playerId);
+    if (!room || !player) return undefined;
+    player.away = true;
+    if (room.phase === "in_game") crowdMatchFor(room)?.setAway(playerId, true);
+    return room;
+  }
+
+  isAway(playerId: string): boolean {
+    return Boolean(this.getRoomForPlayer(playerId)?.players.find((player) => player.id === playerId)?.away);
+  }
+
+  resume(token: string): { room: Room; player: Player } {
+    const playerId = this.tokenOwners.get(token);
+    const room = playerId ? this.getRoomForPlayer(playerId) : undefined;
+    const player = room?.players.find((candidate) => candidate.id === playerId);
+    if (!room || !player) throw new Error("That seat has gone. Join the room again.");
+    player.away = false;
+    if (room.phase === "in_game") crowdMatchFor(room)?.setAway(player.id, false);
+    return { room, player };
+  }
+
+  rename(playerId: string, displayName: string): Room {
+    const room = this.getRoomForPlayer(playerId);
+    const player = room?.players.find((candidate) => candidate.id === playerId);
+    if (!room || !player) throw new Error("Create or join a room first.");
+    if (room.phase !== "lobby") throw new Error("Names can only change in the lobby.");
+    player.displayName = displayName;
+    return room;
+  }
+
   leave(playerId: string): Room | undefined {
+    const token = this.resumeTokens.get(playerId);
+    if (token) this.tokenOwners.delete(token);
+    this.resumeTokens.delete(playerId);
     const room = this.getRoomForPlayer(playerId);
     if (!room) return undefined;
     const minigame = room.phase === "in_game" ? getMinigame(room.selectedMinigameId) : undefined;
@@ -172,7 +215,11 @@ export class RoomManager {
   }
 
   private createPlayer(displayName: string): Player {
-    return { id: randomUUID(), displayName, isHost: false, isReady: false, score: 0 };
+    const player = { id: randomUUID(), displayName, isHost: false, isReady: false, score: 0 };
+    const token = randomUUID();
+    this.resumeTokens.set(player.id, token);
+    this.tokenOwners.set(token, player.id);
+    return player;
   }
 
   private createRoomCode(): string {

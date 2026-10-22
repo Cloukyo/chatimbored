@@ -9,6 +9,9 @@ import type { Room } from "./rooms/Room.js";
 const port = Number(process.env.PORT ?? 8787);
 const manager = new RoomManager();
 const sockets = new Map<string, WebSocket>();
+// How long a dropped player's seat is held for them.
+const RESUME_GRACE_MS = 90_000;
+const leaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 const server = createServer((request, response) => {
   if (request.url === "/health") {
@@ -45,8 +48,27 @@ wss.on("connection", (socket) => {
         return;
       }
 
+      if (message.type === MESSAGE_TYPES.RESUME) {
+        const result = manager.resume(message.token);
+        playerId = result.player.id;
+        clearTimeout(leaveTimers.get(playerId));
+        leaveTimers.delete(playerId);
+        // A stale socket for the same seat stops counting as that player.
+        sockets.set(playerId, socket);
+        broadcastRoom(result.room);
+        return;
+      }
+
       if (message.type === MESSAGE_TYPES.LEAVE_ROOM) {
         if (playerId) broadcastRoom(manager.leave(playerId));
+        if (playerId) sockets.delete(playerId);
+        playerId = undefined;
+        return;
+      }
+
+      if (message.type === MESSAGE_TYPES.RENAME) {
+        if (!playerId) throw new Error("Create or join a room first.");
+        broadcastRoom(manager.rename(playerId, message.displayName));
         return;
       }
 
@@ -62,10 +84,18 @@ wss.on("connection", (socket) => {
   });
 
   socket.on("close", () => {
-    if (!playerId) return;
-    const room = manager.leave(playerId);
-    sockets.delete(playerId);
-    broadcastRoom(room);
+    const id = playerId;
+    if (!id || sockets.get(id) !== socket) return;
+    sockets.delete(id);
+    broadcastRoom(manager.disconnect(id));
+    clearTimeout(leaveTimers.get(id));
+    leaveTimers.set(
+      id,
+      setTimeout(() => {
+        leaveTimers.delete(id);
+        if (!sockets.has(id) && manager.isAway(id)) broadcastRoom(manager.leave(id));
+      }, RESUME_GRACE_MS),
+    );
   });
 });
 
@@ -123,7 +153,8 @@ function broadcastRoom(room?: Room): void {
     const socket = sockets.get(player.id);
     if (!socket) continue;
     const game = gameFor(room, player.id, snapshot.game);
-    send(socket, { type: MESSAGE_TYPES.ROOM_STATE, room: { ...snapshot, game, night: room.nightFor(player.id) }, playerId: player.id });
+    const resumeToken = manager.resumeTokenFor(player.id);
+    send(socket, { type: MESSAGE_TYPES.ROOM_STATE, room: { ...snapshot, game, night: room.nightFor(player.id) }, playerId: player.id, resumeToken });
     if (game) send(socket, { type: MESSAGE_TYPES.GAME_STATE, game });
   }
 }

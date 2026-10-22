@@ -12,6 +12,8 @@ export const MESSAGE_TYPES = {
   GAME_STATE: "GAME_STATE",
   GAME_OVER: "GAME_OVER",
   RETURN_TO_LOBBY: "RETURN_TO_LOBBY",
+  RESUME: "RESUME",
+  RENAME: "RENAME",
   START_NIGHT: "START_NIGHT",
   PICK_ROOM: "PICK_ROOM",
   NEXT_ROUND: "NEXT_ROUND",
@@ -27,6 +29,8 @@ export type PlayerSnapshot = {
   isHost: boolean;
   isReady: boolean;
   score: number;
+  // Lost their connection and has a little while to come back to the same seat.
+  away?: boolean;
 };
 
 // Everything but "lobby", "in_game" and "results" only happens during a Party Night.
@@ -344,6 +348,9 @@ export type ClientMessage =
   | { type: "CREATE_ROOM"; displayName: string }
   | { type: "JOIN_ROOM"; roomCode: string; displayName: string }
   | { type: "LEAVE_ROOM" }
+  // Take back a seat after a refresh or a dropped connection.
+  | { type: "RESUME"; token: string }
+  | { type: "RENAME"; displayName: string }
   | { type: "PLAYER_READY"; isReady: boolean }
   | { type: "START_GAME"; minigameId?: string }
   | { type: "PLAYER_INPUT"; input: PlayerInputPayload }
@@ -363,7 +370,8 @@ export type NightAction =
   | { kind: "skip" };
 
 export type ServerMessage =
-  | { type: "ROOM_STATE"; room: RoomSnapshot; playerId: string }
+  // resumeToken is private to this player: sending it back in RESUME reclaims the seat.
+  | { type: "ROOM_STATE"; room: RoomSnapshot; playerId: string; resumeToken?: string }
   | { type: "GAME_STATE"; game: GameSnapshot }
   | { type: "GAME_OVER"; game: GameSnapshot; winnerId?: string }
   | { type: "ERROR"; message: string };

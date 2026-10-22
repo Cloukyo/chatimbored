@@ -834,3 +834,28 @@ label.inline {
 #landing > .muted {
   text-align: center;
 }
+
+.toast.info {
+  background: var(--panel-edge);
+  color: var(--text);
+}
+
+.tag.away {
+  color: var(--accent);
+}
+
+.players .who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+button.small {
+  padding: 2px 10px;
+  font-size: 13px;
+}
+
+input.rename {
+  padding: 4px 8px;
+  max-width: 220px;
+}

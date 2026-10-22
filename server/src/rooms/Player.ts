@@ -4,4 +4,5 @@ export type Player = {
   isHost: boolean;
   isReady: boolean;
   score: number;
+  away?: boolean;
 };

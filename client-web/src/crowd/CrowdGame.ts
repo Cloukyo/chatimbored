@@ -8,6 +8,7 @@ import {
 } from "../../../shared/crowd/protocol.js";
 import {
   type Figure,
+  type FloorStyle,
   type View2D,
   drawBump,
   drawCrosshair,
@@ -51,6 +52,20 @@ const MODE_TITLES: Record<CrowdView["mode"], string> = {
 };
 
 const TRICK_NAMES: Record<string, string> = Object.fromEntries(HOST_TRICKS.map((trick) => [trick.key, trick.name]));
+
+// Each mode is played in its own room of the mansion.
+const FLOOR_STYLES: Record<CrowdView["mode"], FloorStyle> = {
+  act_natural: "hall",
+  silent_witness: "library",
+  lantern_festival: "garden",
+  bell_ringers: "tower",
+  heist_hour: "vault",
+  marked: "gallery",
+  freeze_frame: "music",
+  hot_parcel: "post",
+  closing_time: "terrace",
+  last_dance: "ballroom",
+};
 
 type Snapshot = { time: number; figures: Map<number, Figure> };
 type Pending = { seq: number; direction: CrowdVector; run: boolean };
@@ -109,6 +124,8 @@ export class CrowdGame {
   // Estimated local time of server tick 0; the smallest observed offset is the least delayed.
   private tickClockOffset = Number.POSITIVE_INFINITY;
   private floor?: HTMLCanvasElement;
+  private floorMode?: CrowdView["mode"];
+  private hudHeight = 0;
   private viewport: View2D = { scale: 1, offsetX: 0, offsetY: 0 };
   private readonly keys = new Set<string>();
   private readonly seats: SeatState[];
@@ -177,7 +194,10 @@ export class CrowdGame {
     if (state !== this.seats[0]) return;
 
     const now = performance.now();
-    if (!this.floor || this.view?.arena.width !== view.arena.width) this.floor = paintFloor(view.arena);
+    if (!this.floor || this.floorMode !== view.mode) {
+      this.floor = paintFloor(view.arena, FLOOR_STYLES[view.mode]);
+      this.floorMode = view.mode;
+    }
     this.endsAt = endsAt;
 
     this.tickClockOffset = Math.min(this.tickClockOffset, now - view.tick * CROWD_TICK_MS);
@@ -380,10 +400,12 @@ export class CrowdGame {
     const view = this.view;
     if (!view) return;
     const lines = this.shared ? [...sharedHudLines(view), ...this.sharedPartyLines()] : [...this.hudLines(view), ...this.partyLines(view)];
-    const parts = [`<span data-timer></span>`, `<b>${MODE_TITLES[view.mode]}</b>`, ...lines];
-    if (!this.shared && view.ghost) parts.push("You're a ghost: steer your guest");
-    else if (!this.shared && !view.alive) parts.push("You're down");
-    this.hud.innerHTML = parts.join(" · ");
+    if (!this.shared && view.ghost) lines.push("<b>You're a ghost</b>: steer your guest");
+    else if (!this.shared && !view.alive) lines.push("<b>You're down</b>");
+    // The timer is filled in every frame by render().
+    this.hud.innerHTML =
+      `<div class="hud-top"><span class="hud-time" data-timer>${this.secondsLeft()}s</span><span class="hud-title">${MODE_TITLES[view.mode]}</span></div>` +
+      `<div class="hud-lines">${lines.map((line) => `<span>${line}</span>`).join("")}</div>`;
   }
 
   // Party Night extras, for a screen with one player on it.
@@ -458,6 +480,16 @@ export class CrowdGame {
     }
   }
 
+  // Room above the arena for the HUD. It only grows, so the arena doesn't jump as HUD lines come and go.
+  private hudSpace(): number {
+    this.hudHeight = Math.max(this.hudHeight, this.hud.offsetHeight);
+    return this.hudHeight + 20;
+  }
+
+  private secondsLeft(): number {
+    return Math.max(0, Math.ceil((this.endsAt - Date.now()) / 1000));
+  }
+
   private resize(): void {
     const ratio = window.devicePixelRatio || 1;
     this.canvas.width = Math.round(this.canvas.clientWidth * ratio);
@@ -475,11 +507,15 @@ export class CrowdGame {
     const view = this.view;
     ctx.fillStyle = "#1d2321";
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    const timer = this.hud.querySelector("[data-timer]");
-    if (timer) timer.textContent = `${Math.max(0, Math.ceil((this.endsAt - Date.now()) / 1000))}s`;
+    const timer = this.hud.querySelector<HTMLElement>("[data-timer]");
+    if (timer) {
+      const seconds = this.secondsLeft();
+      timer.textContent = `${seconds}s`;
+      timer.classList.toggle("urgent", seconds <= 10 && !view?.result);
+    }
     if (!view || !this.floor) return;
 
-    this.viewport = fitArena(this.canvas.width, this.canvas.height, view.arena, 54 * (window.devicePixelRatio || 1));
+    this.viewport = fitArena(this.canvas.width, this.canvas.height, view.arena, this.hudSpace() * (window.devicePixelRatio || 1));
     ctx.save();
     ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
     ctx.scale(this.viewport.scale, this.viewport.scale);

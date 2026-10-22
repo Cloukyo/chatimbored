@@ -15,6 +15,7 @@ import {
 } from "../../shared/party/night.js";
 import { CrowdGame, type GameSeat, type InputSource } from "./crowd/CrowdGame.js";
 import { PAD, PadEdges, connectedPads } from "./input/pads.js";
+import { roomIcon } from "./party/icons.js";
 import { Connection, resolveServerUrl, wakeServer } from "./net.js";
 
 const MODES = [
@@ -477,7 +478,16 @@ function renderBoard(): void {
         const played = night.played.includes(mansionRoom.key);
         const owner = night.claims[mansionRoom.key];
         const skipped = night.sharedScreen && mansionRoom.needsPrivateText;
-        tile.className = `room${played ? " played" : ""}${offered >= 0 ? " offered" : ""}${offered === boardFocus && offered >= 0 ? " focused" : ""}`;
+        tile.className = `room${played ? " played" : ""}${owner ? " claimed" : ""}${offered >= 0 ? " offered" : ""}${offered === boardFocus && offered >= 0 ? " focused" : ""}`;
+        if (owner) {
+          tile.style.setProperty("--owner", colorOf(owner));
+          // A wall shared with another of the same owner's rooms opens into a doorway.
+          const neighbour = (col: number, row: number) => MANSION_ROOMS.find((other) => other.col === col && other.row === row);
+          const right = neighbour(mansionRoom.col + 1, mansionRoom.row);
+          const below = neighbour(mansionRoom.col, mansionRoom.row + 1);
+          if (right && night.claims[right.key] === owner) tile.classList.add("join-right");
+          if (below && night.claims[below.key] === owner) tile.classList.add("join-down");
+        }
         tile.disabled = offered < 0 || !picker;
         const name = document.createElement("strong");
         name.textContent = mansionRoom.name;
@@ -488,7 +498,10 @@ function renderBoard(): void {
         state.className = "owner";
         if (owner) state.append(swatch(owner), `Claimed by ${nameOf(owner)}`);
         else state.textContent = played ? "Nobody claimed it" : skipped ? "Closed tonight (needs secret words)" : offered >= 0 ? "On offer" : "";
-        tile.append(name, mode, state);
+        const icon = document.createElement("span");
+        icon.className = "room-icon";
+        icon.innerHTML = roomIcon(mansionRoom.key);
+        tile.append(icon, name, mode, state);
         tile.addEventListener("click", () => pickRoom(mansionRoom.key));
         return tile;
       }),
@@ -552,7 +565,7 @@ function renderBoardExtras(night: NightSnapshot): void {
 }
 
 // Between rounds: the shop, the Mole vote and backing a finalist. Each of this screen's players gets a row.
-type StepChoice = { label: string; action: ClientMessage; chosen?: boolean; disabled?: boolean };
+type StepChoice = { label: string; action: ClientMessage; chosen?: boolean; disabled?: boolean; detail?: string; cost?: number; who?: string };
 
 function localPlayers(): string[] {
   const ids = [playerId, ...couchSeats.map((seat) => seat.playerId)];
@@ -571,7 +584,9 @@ function stepChoices(night: NightSnapshot, id: string): { note: string; choices:
       note: done ? "Done shopping." : `${tips} tips to spend.`,
       choices: [
         ...perks.map((perk) => ({
-          label: `${perk.name} (${perk.cost})`,
+          label: perk.name,
+          detail: perk.blurb,
+          cost: perk.cost,
           action: { type: "NIGHT_ACTION", action: { kind: "buy", perk: perk.key } } as ClientMessage,
           chosen: bought === perk.key,
           disabled: done || Boolean(bought) || tips < perk.cost,
@@ -586,6 +601,7 @@ function stepChoices(night: NightSnapshot, id: string): { note: string; choices:
       note: voted ? "Vote in. Waiting for everyone else." : "Who's the Mole?",
       choices: others.map((player) => ({
         label: player.displayName,
+        who: player.id,
         action: { type: "NIGHT_ACTION", action: { kind: "vote", playerId: player.id } } as ClientMessage,
         disabled: voted,
       })),
@@ -598,6 +614,7 @@ function stepChoices(night: NightSnapshot, id: string): { note: string; choices:
       note: backed ? `Backing ${nameOf(backed)}.` : "Who are you backing?",
       choices: (night.finalists ?? []).map((finalist) => ({
         label: nameOf(finalist),
+        who: finalist,
         action: { type: "NIGHT_ACTION", action: { kind: "back", playerId: finalist } } as ClientMessage,
         chosen: backed === finalist,
         disabled: Boolean(backed),
@@ -645,7 +662,21 @@ function renderStep(): void {
       row.className = "choices";
       choices.forEach((choice, index) => {
         const button = document.createElement("button");
-        button.textContent = choice.label;
+        if (choice.detail) {
+          button.className = "perk";
+          const title = document.createElement("strong");
+          title.textContent = choice.label;
+          const cost = document.createElement("span");
+          cost.className = "cost";
+          cost.textContent = `${choice.cost} tips`;
+          const detail = document.createElement("span");
+          detail.className = "detail";
+          detail.textContent = choice.detail;
+          button.append(title, cost, detail);
+        } else {
+          if (choice.who) button.append(swatch(choice.who));
+          button.append(choice.label);
+        }
         button.disabled = Boolean(choice.disabled);
         button.setAttribute("aria-pressed", String(Boolean(choice.chosen)));
         if (anyPad && index === focus && !choice.disabled) button.classList.add("focused");
@@ -693,6 +724,29 @@ function renderNightOver(): void {
     : night.finaleWinner === winner.playerId
       ? `${nameOf(winner.playerId)} wins the Last Dance and the night!`
       : `${nameOf(winner.playerId)} wins the night!`;
+  // Top three on a podium: second, first, third from left to right.
+  const podium = [night.standings[1], night.standings[0], night.standings[2]];
+  $("podium").replaceChildren(
+    ...podium.map((standing, index) => {
+      const step = document.createElement("div");
+      if (!standing) {
+        step.className = "step empty";
+        return step;
+      }
+      const place = [2, 1, 3][index];
+      step.className = `step place-${place}`;
+      step.style.setProperty("--owner", colorOf(standing.playerId));
+      const who = document.createElement("strong");
+      who.textContent = nameOf(standing.playerId);
+      const total = document.createElement("span");
+      total.textContent = `${standing.total} pts`;
+      const block = document.createElement("div");
+      block.className = "block";
+      block.textContent = String(place);
+      step.append(who, total, block);
+      return step;
+    }),
+  );
   const reveal = night.moleReveal;
   const moleLine = $("mole-reveal");
   moleLine.hidden = !reveal;
@@ -747,9 +801,13 @@ function cell(value: number): HTMLTableCellElement {
 function swatch(id: string): HTMLElement {
   const dot = document.createElement("span");
   dot.className = "swatch";
-  const index = room?.players.findIndex((player) => player.id === id) ?? -1;
-  dot.style.background = index >= 0 ? PLAYER_COLORS[index % PLAYER_COLORS.length] : "transparent";
+  dot.style.background = colorOf(id);
   return dot;
+}
+
+function colorOf(id: string): string {
+  const index = room?.players.findIndex((player) => player.id === id) ?? -1;
+  return index >= 0 ? PLAYER_COLORS[index % PLAYER_COLORS.length] : "transparent";
 }
 
 function nameOf(id?: string): string {
@@ -773,6 +831,34 @@ function startGame(): void {
     })),
   ];
   game = new CrowdGame($<HTMLCanvasElement>("arena"), $("hud"), seats, nameOf, sharedScreen());
+  showRoundIntro();
+}
+
+// A title card for each room of the night, shown over the first few seconds of the round.
+let introTimer: number | undefined;
+function showRoundIntro(): void {
+  const night = room?.night;
+  const intro = $("round-intro");
+  window.clearTimeout(introTimer);
+  intro.hidden = true;
+  if (!night) return;
+  const finale = !night.current && Boolean(night.finalists);
+  const mansionRoom = night.current ? MANSION_ROOMS.find((candidate) => candidate.key === night.current) : undefined;
+  if (!finale && !mansionRoom) return;
+  const mode = MODES.find((candidate) => candidate.id === mansionRoom?.minigameId);
+  $("intro-icon").innerHTML = roomIcon(finale ? "ballroom" : mansionRoom!.key);
+  $("intro-round").textContent = finale ? "The final dance" : `Round ${night.roundsPlayed + 1} of ${night.totalRounds}`;
+  $("intro-room").textContent = finale ? "The Ballroom" : mansionRoom!.name;
+  $("intro-mode").textContent = finale ? `${night.finalists!.map(nameOf).join(" vs ")}` : (mode?.name ?? "");
+  $("intro-blurb").textContent = finale
+    ? "Hit the other finalist to win the night. Everyone else steers a guest."
+    : (mode?.blurb ?? "");
+  intro.hidden = false;
+  intro.classList.remove("leaving");
+  introTimer = window.setTimeout(() => {
+    intro.classList.add("leaving");
+    introTimer = window.setTimeout(() => (intro.hidden = true), 400);
+  }, 3200);
 }
 
 function stopGame(): void {
@@ -810,13 +896,36 @@ function showResults(snapshot: GameSnapshot): void {
   $("reveal").replaceChildren(
     ...result.reveal.map((entry) => {
       const item = document.createElement("li");
+      const won = entry.playerId === result.winnerPlayerId || (result.winnerRole !== undefined && entry.role === result.winnerRole);
+      item.className = won ? "won" : "";
       const who = document.createElement("span");
-      who.textContent = name(entry.playerId);
+      who.className = "who";
+      who.append(swatch(entry.playerId), name(entry.playerId));
+      if (entry.role !== "runner") {
+        const role = document.createElement("span");
+        role.className = `chip role-${entry.role}`;
+        role.textContent = ROLE_NAMES[entry.role];
+        who.append(role);
+      }
       const what = document.createElement("span");
       what.className = "tag";
-      const role = entry.role === "runner" ? "" : `${ROLE_NAMES[entry.role]} · `;
-      const points = round ? ` · ${signed(round.points[entry.playerId] ?? 0)} pts${round.claimedBy === entry.playerId ? ", claims the room" : ""}` : "";
-      what.textContent = `${role}${entry.alive ? "survived" : "down"}${points}`;
+      const status = document.createElement("span");
+      status.textContent = entry.alive ? "survived" : "down";
+      status.className = entry.alive ? "" : "down";
+      what.append(status);
+      if (round?.claimedBy === entry.playerId) {
+        const claim = document.createElement("span");
+        claim.className = "chip claim";
+        claim.textContent = "claims the room";
+        what.append(claim);
+      }
+      if (round) {
+        const value = round.points[entry.playerId] ?? 0;
+        const points = document.createElement("b");
+        points.className = `points${value < 0 ? " negative" : ""}`;
+        points.textContent = signed(value);
+        what.append(points);
+      }
       item.append(who, what);
       return item;
     }),

@@ -53,7 +53,8 @@ wss.on("connection", (socket) => {
       if (!playerId) throw new Error("Create or join a room first.");
       const room = manager.handleRoomMessage(playerId, message, finishAndBroadcast, broadcastTick);
       // Tick-driven games already stream state every tick; skip the per-input full broadcast.
-      if (message.type === MESSAGE_TYPES.PLAYER_INPUT && isTickBroadcastOnly(room)) return;
+      // Late inputs after a round ends change nothing, and a game finished by an input has already been broadcast.
+      if (message.type === MESSAGE_TYPES.PLAYER_INPUT && (room.phase !== "in_game" || isTickBroadcastOnly(room))) return;
       broadcastRoom(room);
     } catch (error) {
       send(socket, { type: MESSAGE_TYPES.ERROR, message: error instanceof Error ? error.message : "Invalid message." });

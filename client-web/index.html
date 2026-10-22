@@ -82,6 +82,7 @@
 
       <section id="night-over" class="screen card wide" hidden>
         <h2 id="night-over-title"></h2>
+        <div id="podium" class="podium"></div>
         <p id="mole-reveal" class="secret" hidden></p>
         <table class="standings">
           <thead><tr><th>Player</th><th>Points</th><th>Rooms</th><th>Connected</th><th>Total</th></tr></thead>
@@ -97,6 +98,13 @@
       <section id="game" class="screen game" hidden>
         <canvas id="arena"></canvas>
         <div id="hud" class="hud"></div>
+        <div id="round-intro" class="round-intro" hidden>
+          <div id="intro-icon" class="intro-icon"></div>
+          <p id="intro-round" class="intro-round"></p>
+          <h2 id="intro-room"></h2>
+          <p id="intro-mode" class="intro-mode"></p>
+          <p id="intro-blurb" class="muted"></p>
+        </div>
         <div id="results" class="results card" hidden>
           <h2 id="results-title"></h2>
           <ul id="reveal" class="players"></ul>

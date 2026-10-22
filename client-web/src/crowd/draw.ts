@@ -34,25 +34,122 @@ export function toWorld(view: View2D, screen: CrowdVector): CrowdVector {
   return { x: (screen.x - view.offsetX) / view.scale, y: (screen.y - view.offsetY) / view.scale };
 }
 
-// The plaza is drawn once per arena and reused every frame.
-export function paintFloor(arena: Arena): HTMLCanvasElement {
+// Each mode is a room in the mansion, so each gets its own floor. Kept mid-toned so the grey-blue coats stand out.
+type FloorTheme = {
+  base: [number, number, number];
+  // A second colour for checkerboards and alternating planks.
+  alt?: [number, number, number];
+  pattern: "tiles" | "checker" | "planks" | "flagstones" | "carpet" | "grass";
+  size: number;
+  jitter: number;
+  edge: string;
+};
+
+export type FloorStyle = "plaza" | "hall" | "library" | "garden" | "tower" | "vault" | "gallery" | "music" | "post" | "terrace" | "ballroom";
+
+const FLOORS: Record<FloorStyle, FloorTheme> = {
+  plaza: { base: [111, 119, 104], pattern: "tiles", size: 40, jitter: 14, edge: "rgb(40 44 38 / 55%)" },
+  hall: { base: [160, 152, 136], alt: [142, 134, 118], pattern: "checker", size: 48, jitter: 6, edge: "rgb(70 60 44 / 70%)" },
+  library: { base: [120, 92, 66], alt: [108, 82, 58], pattern: "planks", size: 26, jitter: 10, edge: "rgb(52 36 24 / 75%)" },
+  garden: { base: [104, 128, 82], pattern: "grass", size: 20, jitter: 16, edge: "rgb(58 74 44 / 80%)" },
+  tower: { base: [124, 122, 116], pattern: "flagstones", size: 64, jitter: 16, edge: "rgb(54 52 48 / 75%)" },
+  vault: { base: [118, 116, 100], alt: [104, 102, 88], pattern: "checker", size: 60, jitter: 4, edge: "rgb(46 44 36 / 85%)" },
+  gallery: { base: [146, 114, 80], alt: [134, 102, 70], pattern: "planks", size: 18, jitter: 8, edge: "rgb(70 48 30 / 75%)" },
+  music: { base: [132, 70, 66], pattern: "carpet", size: 56, jitter: 5, edge: "rgb(70 34 30 / 80%)" },
+  post: { base: [140, 128, 104], pattern: "tiles", size: 36, jitter: 10, edge: "rgb(70 60 44 / 70%)" },
+  terrace: { base: [128, 118, 112], pattern: "flagstones", size: 52, jitter: 14, edge: "rgb(58 50 46 / 75%)" },
+  ballroom: { base: [140, 112, 76], alt: [116, 90, 62], pattern: "checker", size: 56, jitter: 5, edge: "rgb(224 166 74 / 60%)" },
+};
+
+// The floor is drawn once per arena and reused every frame.
+export function paintFloor(arena: Arena, style: FloorStyle = "plaza"): HTMLCanvasElement {
   const floor = document.createElement("canvas");
   floor.width = arena.width;
   floor.height = arena.height;
   const ctx = floor.getContext("2d")!;
-  ctx.fillStyle = "#6f7768";
+  const theme = FLOORS[style];
+  const rgb = ([r, g, b]: [number, number, number], shade: number) => `rgb(${r + shade} ${g + shade} ${b + shade})`;
+  const darker = theme.base.map((value) => value - 30) as [number, number, number];
+  ctx.fillStyle = rgb(darker, 0);
   ctx.fillRect(0, 0, arena.width, arena.height);
 
-  const tile = 40;
-  for (let y = 0; y < arena.height; y += tile) {
-    for (let x = 0; x < arena.width; x += tile) {
-      const shade = hash(x * 7 + y * 13) * 14 - 7;
-      ctx.fillStyle = `rgb(${111 + shade} ${119 + shade} ${104 + shade})`;
-      ctx.fillRect(x + 1, y + 1, tile - 2, tile - 2);
+  const size = theme.size;
+  const noise = (x: number, y: number) => hash(x * 7 + y * 13) * theme.jitter - theme.jitter / 2;
+  if (theme.pattern === "planks") {
+    // Staggered boards running across the room.
+    const length = size * 5;
+    for (let y = 0, row = 0; y < arena.height; y += size, row += 1) {
+      const offset = (row % 3) * (length / 3);
+      for (let x = -offset; x < arena.width; x += length) {
+        const colour = theme.alt && (row + Math.round(x / length)) % 2 ? theme.alt : theme.base;
+        ctx.fillStyle = rgb(colour, noise(x, y));
+        ctx.fillRect(x + 1, y + 1, length - 2, size - 2);
+      }
+    }
+  } else if (theme.pattern === "flagstones") {
+    // Uneven stones: rows of varying widths.
+    for (let y = 0; y < arena.height; y += size) {
+      let x = -hash(y) * size;
+      while (x < arena.width) {
+        const width = size * (0.7 + hash(x * 3 + y) * 0.8);
+        ctx.fillStyle = rgb(theme.base, noise(x, y));
+        roundRect(ctx, x + 2, y + 2, width - 4, size - 4, 6);
+        x += width;
+      }
+    }
+  } else if (theme.pattern === "grass") {
+    ctx.fillStyle = rgb(theme.base, 0);
+    ctx.fillRect(0, 0, arena.width, arena.height);
+    for (let y = 0; y < arena.height; y += size) {
+      for (let x = 0; x < arena.width; x += size) {
+        ctx.fillStyle = rgb(theme.base, noise(x, y));
+        ctx.fillRect(x, y, size, size);
+      }
+    }
+    // Tufts.
+    ctx.strokeStyle = rgb(theme.base, -18);
+    ctx.lineWidth = 1.5;
+    for (let index = 0; index < (arena.width * arena.height) / 900; index += 1) {
+      const x = hash(index * 31) * arena.width;
+      const y = hash(index * 57 + 3) * arena.height;
+      ctx.beginPath();
+      ctx.moveTo(x - 3, y);
+      ctx.lineTo(x - 1, y - 5);
+      ctx.moveTo(x + 2, y);
+      ctx.lineTo(x + 3, y - 4);
+      ctx.stroke();
+    }
+  } else if (theme.pattern === "carpet") {
+    ctx.fillStyle = rgb(theme.base, 0);
+    ctx.fillRect(0, 0, arena.width, arena.height);
+    // A repeating diamond motif.
+    ctx.strokeStyle = rgb(theme.base, 16);
+    ctx.lineWidth = 2;
+    for (let y = 0; y < arena.height + size; y += size) {
+      for (let x = 0; x < arena.width + size; x += size) {
+        ctx.beginPath();
+        ctx.moveTo(x, y - size / 3);
+        ctx.lineTo(x + size / 3, y);
+        ctx.lineTo(x, y + size / 3);
+        ctx.lineTo(x - size / 3, y);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+    ctx.strokeStyle = "rgb(224 166 74 / 35%)";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(24, 24, arena.width - 48, arena.height - 48);
+  } else {
+    for (let y = 0, row = 0; y < arena.height; y += size, row += 1) {
+      for (let x = 0, col = 0; x < arena.width; x += size, col += 1) {
+        const colour = theme.pattern === "checker" && theme.alt && (row + col) % 2 ? theme.alt : theme.base;
+        ctx.fillStyle = rgb(colour, noise(x, y));
+        ctx.fillRect(x + 1, y + 1, size - 2, size - 2);
+      }
     }
   }
 
-  ctx.strokeStyle = "rgb(40 44 38 / 55%)";
+  ctx.strokeStyle = theme.edge;
   ctx.lineWidth = 6;
   ctx.strokeRect(3, 3, arena.width - 6, arena.height - 6);
 

@@ -78,7 +78,9 @@ export class RoomManager {
 
     if (message.type === "PLAYER_INPUT") {
       const minigame = getMinigame(room.selectedMinigameId);
-      if (!minigame || room.phase !== "in_game") throw new Error("No minigame is running.");
+      // Inputs already in flight when a round ends are dropped quietly rather than shown as an error.
+      if (room.phase !== "in_game") return room;
+      if (!minigame) throw new Error("No minigame is running.");
       minigame.handleInput(room, playerId, message.input);
       if (room.game?.winnerId) onGameFinished(room);
       return room;

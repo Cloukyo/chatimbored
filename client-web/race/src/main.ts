@@ -147,9 +147,24 @@ for (const track of [{ id: "", name: "Surprise me" }, ...TRACKS]) {
 
 $("ready").addEventListener("click", () => {
   const mine = room?.players.find((player) => player.id === me.playerId);
+  if (!mine?.isReady) goLandscape();
   connection.send({ type: "PLAYER_READY", isReady: !mine?.isReady });
 });
-$("start").addEventListener("click", () => connection.send({ type: "START_GAME", minigameId: PILE_UP_ID, trackId: selectedTrack || undefined }));
+$("start").addEventListener("click", () => {
+  goLandscape();
+  connection.send({ type: "START_GAME", minigameId: PILE_UP_ID, trackId: selectedTrack || undefined });
+});
+$("rotate").addEventListener("click", goLandscape);
+
+// On a phone, go full screen and turn sideways where the browser allows it (Android does, iPhones don't).
+// It needs a tap to be allowed, so it runs from the Start, Ready and rotate buttons.
+function goLandscape(): void {
+  if (!isTouch || document.fullscreenElement || !document.documentElement.requestFullscreen) return;
+  document.documentElement
+    .requestFullscreen()
+    .then(() => (screen.orientation as ScreenOrientation & { lock?: (orientation: string) => Promise<void> }).lock?.("landscape"))
+    .catch(() => undefined);
+}
 $("leave").addEventListener("click", () => {
   connection.send({ type: "LEAVE_ROOM" });
   leaveToLanding();
@@ -207,11 +222,13 @@ function renderLobby(): void {
   $("ready").textContent = mine?.isReady ? "Not ready" : "Ready";
   $("start").hidden = !isHost;
   const everyoneReady = room.players.every((player) => player.isReady || player.isHost);
-  const enough = room.players.length >= 2;
-  ($("start") as HTMLButtonElement).disabled = !everyoneReady || !enough;
+  const solo = room.players.length === 1;
+  ($("start") as HTMLButtonElement).disabled = !everyoneReady;
   $("claim-pad").textContent = claimingPad ? "Press A on the controller you want…" : me.pad !== undefined ? `Driving with controller ${me.pad + 1}` : "Drive with a controller myself";
-  $("lobby-status").textContent = !enough
-    ? "Need at least 2 drivers: share the link, or add a controller or a second keyboard player. Bots fill the rest."
+  $("lobby-status").textContent = solo
+    ? isTouch
+      ? "Just you and the bots. Share the link to bring friends."
+      : "Just you and the bots. Share the link, add a controller or press Enter for a second keyboard player to bring friends."
     : !isHost
       ? "The host picks the track and starts the race."
       : everyoneReady

@@ -24,7 +24,8 @@ export function raceMatchFor(room: Room): RaceMatch | undefined {
 export const pileUp: Minigame = {
   id: PILE_UP_ID,
   name: "Pile-Up",
-  minPlayers: 2,
+  // Bots fill the grid, so one person can play alone.
+  minPlayers: 1,
   maxPlayers: 8,
   tickMs: TICK_MS,
   tickBroadcastOnly: true,

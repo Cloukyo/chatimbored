@@ -256,3 +256,13 @@ test("race input is validated and clamped", () => {
   assert.throws(() => parseClientMessage({ type: "PLAYER_INPUT", input: { kind: "race", steer: 0, throttle: 0, fires: -1 } }));
   assert.throws(() => parseClientMessage({ type: "START_GAME", minigameId: "pile_up", trackId: 5 }));
 });
+
+test("one player can start a race alone against bots", () => {
+  const room = new Room("SOLO1");
+  room.addPlayer({ id: "p1", displayName: "Ana", isHost: true, isReady: false, score: 0 });
+  assert.equal(room.canStart("p1", pileUp), true);
+  room.game = pileUp.setup(room);
+  const match = raceMatchFor(room)!;
+  assert.equal(match.cars.length, GRID_SIZE);
+  assert.equal(match.cars.filter((car) => !car.bot).length, 1);
+});

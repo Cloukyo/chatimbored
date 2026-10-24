@@ -9,6 +9,7 @@ import {
   type ShotKind,
   type WeaponKind,
 } from "../../../shared/race/protocol.js";
+import { clampToScreen, halfWidthAt, insideBy, toScreenSpace, type ScreenView } from "../../../shared/race/camera.js";
 import { VERGE_WIDTH, locate, pointAt, trackById, type Track } from "../../../shared/race/track.js";
 import { pickWeighted, type Random } from "../crowd/random.js";
 import { botInput, type BotBrain } from "./bot.js";
@@ -59,6 +60,10 @@ const RESPAWN_BACK = 140;
 const CAMERA_FOLLOW = 4;
 // How far up the road the camera looks, at the leader's top speed.
 const CAMERA_LEAD = 150;
+// The camera turns to face down the road this far ahead of the leader, at this rate. Turning too fast would throw
+// everyone off the sides on every bend; Mashed's camera swung round smoothly.
+const CAMERA_LOOK = 260;
+const CAMERA_TURN = 1.4;
 // Right after the start nobody can fire or be knocked out, so a round can't be over before it starts.
 export const START_GRACE_S = 2;
 // If a round somehow drags on this long, whoever is in front takes it.
@@ -220,7 +225,7 @@ export class RaceMatch {
   round = 1;
   tick = 0;
   roundTime = 0;
-  view = { x: 0, y: 0, width: VIEW_WIDTH, height: VIEW_HEIGHT };
+  view: ScreenView = { x: 0, y: 0, width: VIEW_WIDTH, height: VIEW_HEIGHT, angle: 0 };
   zoom = 1;
   outOrder: string[] = [];
   roundWinner?: string;
@@ -332,7 +337,7 @@ export class RaceMatch {
       round: this.round,
       target: this.target,
       tick: this.tick,
-      view: { x: round(this.view.x), y: round(this.view.y), width: round(this.view.width), height: round(this.view.height) },
+      view: { x: round(this.view.x), y: round(this.view.y), width: round(this.view.width), height: round(this.view.height), angle: Math.round(this.view.angle * 1000) / 1000 },
       shrinking: this.phase === "racing" && this.roundTime > SHRINK_AFTER_S,
       cars: this.cars.map(
         (car): RaceCar => ({
@@ -499,7 +504,7 @@ export class RaceMatch {
     this.slicks = [];
     this.zoom = 1;
     const ahead = pointAt(this.track, s);
-    this.view = { x: ahead.x, y: ahead.y, width: VIEW_WIDTH, height: VIEW_HEIGHT };
+    this.view = { x: ahead.x, y: ahead.y, width: VIEW_WIDTH, height: VIEW_HEIGHT, angle: Math.atan2(ahead.ty, ahead.tx) };
     this.updateCamera(0, true);
   }
 
@@ -1134,10 +1139,14 @@ export class RaceMatch {
         strike.x += (dx / distance) * drift;
         strike.y += (dy / distance) * drift;
       }
-      strike.x += car.input.steer * STRIKE_AIM_SPEED * dt;
-      strike.y -= car.input.throttle * STRIKE_AIM_SPEED * dt;
-      strike.x = Math.max(this.view.x - this.view.width / 2, Math.min(this.view.x + this.view.width / 2, strike.x));
-      strike.y = Math.max(this.view.y - this.view.height / 2, Math.min(this.view.y + this.view.height / 2, strike.y));
+      // Steering moves it across the screen and the gas pushes it up the screen, whichever way the camera faces.
+      const cos = Math.cos(this.view.angle);
+      const sin = Math.sin(this.view.angle);
+      strike.x += (-sin * car.input.steer + cos * car.input.throttle) * STRIKE_AIM_SPEED * dt;
+      strike.y += (cos * car.input.steer + sin * car.input.throttle) * STRIKE_AIM_SPEED * dt;
+      const kept = clampToScreen(this.view, strike.x, strike.y);
+      strike.x = kept.x;
+      strike.y = kept.y;
       const fired = car.input.fires > car.firesSeen;
       car.firesSeen = car.input.fires;
       if (fired && strike.reload <= 0) {
@@ -1159,34 +1168,40 @@ export class RaceMatch {
     const targetX = ahead.x * 0.6 + packX * 0.4;
     const targetY = ahead.y * 0.6 + packY * 0.4;
     const follow = snap ? 1 : 1 - Math.exp(-CAMERA_FOLLOW * dt);
-    let x = this.view.x + (targetX - this.view.x) * follow;
-    let y = this.view.y + (targetY - this.view.y) * follow;
+    const x = this.view.x + (targetX - this.view.x) * follow;
+    const y = this.view.y + (targetY - this.view.y) * follow;
+
+    // Swing round to look down the road the leader is about to drive.
+    const road = pointAt(this.track, leader.lapS + CAMERA_LOOK);
+    const facing = Math.atan2(road.ty, road.tx);
+    const angle = snap ? facing : wrapAngle(this.view.angle + wrapAngle(facing - this.view.angle) * (1 - Math.exp(-CAMERA_TURN * dt)));
 
     // Zoom out to fit the pack, within limits, like Mashed's camera. Anyone beyond the widest view is on their own.
-    const spreadX = Math.max(...field.map((car) => Math.abs(car.x - x)));
-    const spreadY = Math.max(...field.map((car) => Math.abs(car.y - y)));
-    const wanted = Math.max(ZOOM_IN, Math.min(ZOOM_OUT, Math.max((spreadX + 60) / (VIEW_WIDTH / 2), (spreadY + 60) / (VIEW_HEIGHT / 2))));
+    const unit: ScreenView = { x, y, width: VIEW_WIDTH, height: VIEW_HEIGHT, angle };
+    let wanted = ZOOM_IN;
+    for (const car of field) {
+      const spot = toScreenSpace(unit, car.x, car.y);
+      wanted = Math.max(wanted, (Math.abs(spot.along) + 60) / (VIEW_HEIGHT / 2), (Math.abs(spot.across) + 60) / halfWidthAt(unit, spot.along));
+    }
+    wanted = Math.min(ZOOM_OUT, wanted);
     this.zoom = snap ? 1 : this.zoom + (wanted - this.zoom) * (1 - Math.exp(-1.5 * dt));
     const shrink = this.phase === "racing" ? Math.max(MIN_SHRINK, 1 - Math.max(0, this.roundTime - SHRINK_AFTER_S) * SHRINK_RATE) : 1;
     const scale = this.phase === "round_over" || this.phase === "match_over" ? this.view.width / VIEW_WIDTH : this.zoom * shrink;
-    const width = VIEW_WIDTH * scale;
-    const height = VIEW_HEIGHT * scale;
+    const view: ScreenView = { x, y, width: VIEW_WIDTH * scale, height: VIEW_HEIGHT * scale, angle };
 
-    const roomX = Math.max(0, width / 2 - LEADER_MARGIN * scale);
-    const roomY = Math.max(0, height / 2 - LEADER_MARGIN * scale);
-    x = Math.max(leader.x - roomX, Math.min(leader.x + roomX, x));
-    y = Math.max(leader.y - roomY, Math.min(leader.y + roomY, y));
-    this.view = { x, y, width, height };
+    // The leader always stays well inside the screen: move the screen, not the leader.
+    const kept = clampToScreen(view, leader.x, leader.y, LEADER_MARGIN * scale);
+    view.x += leader.x - kept.x;
+    view.y += leader.y - kept.y;
+    this.view = view;
   }
 
   // Off the screen, the clock starts: get back on within two seconds or blow up.
   private checkScreen(dt: number): void {
     if (this.roundTime <= START_GRACE_S) return;
-    const halfWidth = this.view.width / 2 + CAR_RADIUS;
-    const halfHeight = this.view.height / 2 + CAR_RADIUS;
     for (const car of this.cars) {
       if (car.state !== "driving") continue;
-      const off = Math.abs(car.x - this.view.x) > halfWidth || Math.abs(car.y - this.view.y) > halfHeight;
+      const off = insideBy(this.view, car.x, car.y) < -CAR_RADIUS;
       if (!off) {
         car.warnLeft = 0;
         continue;

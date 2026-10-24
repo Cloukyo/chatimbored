@@ -1,4 +1,5 @@
 import type { RaceCar, RaceEvent, RaceView, WeaponKind } from "../../../shared/race/protocol.js";
+import { insideBy, screenCorners } from "../../../shared/race/camera.js";
 import { trackById, type TrackTheme } from "../../../shared/race/track.js";
 import { sound } from "./sound.js";
 import { CAR_COLORS, World3D, type Particle, type ScreenPoint } from "./world3d.js";
@@ -141,7 +142,7 @@ export class RaceRenderer {
       (car) => this.wobble(car, dt),
     );
     const middle = this.toScreen(view.view.x, view.view.y, 0);
-    const across = this.toScreen(view.view.x + 100, view.view.y, 0);
+    const across = this.toScreen(view.view.x - Math.sin(view.view.angle) * 100, view.view.y + Math.cos(view.view.angle) * 100, 0);
     this.scale = Math.max(0.2, Math.hypot(across.x - middle.x, across.y - middle.y) / 100);
 
     this.drawScreenEdge(view, now);
@@ -443,7 +444,7 @@ export class RaceRenderer {
     const ctx = this.context;
     const spot = this.toScreen(car.x, car.y, car.z + 34);
     if (spot.behind) return;
-    const nearEdge = Math.abs(car.x - view.view.x) > view.view.width / 2 - 70 || Math.abs(car.y - view.view.y) > view.view.height / 2 - 70;
+    const nearEdge = insideBy(view.view, car.x, car.y) < 70;
     const size = Math.max(11 * this.ratio, 15 * this.scale);
     ctx.font = `bold ${size}px system-ui, sans-serif`;
     ctx.textAlign = "center";
@@ -549,16 +550,10 @@ export class RaceRenderer {
   }
 
   // Outside the shared screen is the danger zone: darkened, so everyone can see where the edge is.
-  // The camera is tilted, so on screen the edge is a trapezoid, narrower at the far end.
+  // It fills most of the window; whatever shows beyond it, at the sides of the far end, is shaded.
   private drawScreenEdge(view: RaceView, now: number): void {
     const ctx = this.context;
-    const rect = view.view;
-    const corners = [
-      this.toScreen(rect.x - rect.width / 2, rect.y - rect.height / 2, 0),
-      this.toScreen(rect.x + rect.width / 2, rect.y - rect.height / 2, 0),
-      this.toScreen(rect.x + rect.width / 2, rect.y + rect.height / 2, 0),
-      this.toScreen(rect.x - rect.width / 2, rect.y + rect.height / 2, 0),
-    ];
+    const corners = screenCorners(view.view).map((corner) => this.toScreen(corner.x, corner.y, 0));
     ctx.beginPath();
     ctx.rect(0, 0, this.width, this.height);
     corners.forEach((corner, index) => (index === 0 ? ctx.moveTo(corner.x, corner.y) : ctx.lineTo(corner.x, corner.y)));
@@ -668,7 +663,13 @@ function blend(a: RaceView, b: RaceView, t: number): RaceView {
   const shotsBefore = new Map(a.shots.map((shot) => [shot.id, shot]));
   return {
     ...b,
-    view: { x: lerp(a.view.x, b.view.x), y: lerp(a.view.y, b.view.y), width: lerp(a.view.width, b.view.width), height: lerp(a.view.height, b.view.height) },
+    view: {
+      x: lerp(a.view.x, b.view.x),
+      y: lerp(a.view.y, b.view.y),
+      width: lerp(a.view.width, b.view.width),
+      height: lerp(a.view.height, b.view.height),
+      angle: a.view.angle + wrap(b.view.angle - a.view.angle) * t,
+    },
     cars: b.cars.map((car) => {
       const from = carsBefore.get(car.id);
       // A jump of more than a few car lengths is a respawn or a new grid: don't slide across the map.

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fromScreenSpace, insideBy } from "../../../shared/race/camera.js";
 import { trackById, locate, pointAt, TRACKS } from "../../../shared/race/track.js";
 import { parseClientMessage } from "../messages/validation.js";
 import { seededRandom } from "../crowd/random.js";
@@ -224,9 +225,16 @@ test("reaching the target wins the match once the celebration is over", () => {
   match.car("p2")!.points = match.target - 1;
   const tick = () => pileUp.update!(room, 50);
   for (let index = 0; index < 112; index += 1) tick();
+  // p2 sits still, so keep it in the middle of the screen while everyone else is stranded.
+  const winner = match.car("p2")!;
+  const keep = () => {
+    const spot = locate(match.track, match.view.x, match.view.y);
+    Object.assign(winner, { x: match.view.x, y: match.view.y, vx: 0, vy: 0, hint: spot.index });
+  };
   for (const car of match.cars.filter((other) => other.id !== "p2")) {
     for (let index = 0; index < 50 && car.state !== "out"; index += 1) {
       strand(car, match);
+      keep();
       tick();
     }
   }
@@ -265,4 +273,18 @@ test("one player can start a race alone against bots", () => {
   const match = raceMatchFor(room)!;
   assert.equal(match.cars.length, GRID_SIZE);
   assert.equal(match.cars.filter((car) => !car.bot).length, 1);
+});
+
+test("the camera faces down the road, and the screen is narrower near the camera than far from it", () => {
+  const match = race();
+  toGreenLight(match);
+  const view = match.view;
+  const spot = locate(match.track, view.x, view.y);
+  const road = Math.atan2(spot.sample.ty, spot.sample.tx);
+  assert.ok(Math.abs(Math.atan2(Math.sin(view.angle - road), Math.cos(view.angle - road))) < 0.6);
+  // Just inside a far corner is on screen; the same distance across at the near edge is not.
+  const far = fromScreenSpace(view, view.width / 2 - 5, view.height / 2 - 5);
+  const near = fromScreenSpace(view, view.width / 2 - 5, -view.height / 2 + 5);
+  assert.ok(insideBy(view, far.x, far.y) > 0);
+  assert.ok(insideBy(view, near.x, near.y) < 0);
 });

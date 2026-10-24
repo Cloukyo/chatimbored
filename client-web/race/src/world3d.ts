@@ -3,6 +3,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { LOCKING_WEAPONS, type RaceCar, type RaceShot, type RaceView } from "../../../shared/race/protocol.js";
+import { screenCorners, type ScreenView } from "../../../shared/race/camera.js";
 import { VERGE_WIDTH, locate, pointAt, trackById, type Track, type TrackTheme } from "../../../shared/race/track.js";
 
 export const CAR_COLORS = ["#ff5a4e", "#3fa7ff", "#7bd33f", "#ffcf3f", "#c77dff", "#ff8c2e", "#2fe0c8", "#ff7ac3"];
@@ -10,8 +11,8 @@ export const CAR_COLORS = ["#ff5a4e", "#3fa7ff", "#7bd33f", "#ffcf3f", "#c77dff"
 // The road sits on a ledge this far above the ground, so going over a drop edge is a real fall.
 const DROP = 90;
 // The camera looks down at this angle from behind the pack.
-const PITCH = (62 * Math.PI) / 180;
-const FOV = 36;
+const PITCH = (50 * Math.PI) / 180;
+const FOV = 40;
 const MAX_PARTICLES = 900;
 const MAX_SKIDS = 1400;
 const YEET_S = 1.6;
@@ -225,41 +226,43 @@ export class World3D {
     this.camera.updateProjectionMatrix();
   }
 
-  // Frame the server's screen rectangle: the whole of it must be in shot, since leaving it is what knocks a car out.
-  // The camera is tilted, so the rectangle shows as a trapezoid; a few rounds of adjusting distance and aim settle it.
-  private fit(rect: RaceView["view"]): void {
+  // Frame the server's screen: the whole of it must be in shot, since leaving it is what knocks a car out. The camera sits
+  // behind it, facing the way the server's camera faces, so the screen's trapezoid shows as (nearly) the whole window.
+  // A few rounds of adjusting distance and aim settle it.
+  private fit(view: ScreenView): void {
     let distance = this.fitDistance;
     let offset = this.fitOffset;
-    const corners = [
-      [rect.x - rect.width / 2, rect.y - rect.height / 2],
-      [rect.x + rect.width / 2, rect.y - rect.height / 2],
-      [rect.x - rect.width / 2, rect.y + rect.height / 2],
-      [rect.x + rect.width / 2, rect.y + rect.height / 2],
-    ];
+    const corners = screenCorners(view);
     for (let round = 0; round < 4; round += 1) {
-      this.place(rect.x, rect.y + offset, distance);
+      this.place(view, offset, distance);
       let minX = Infinity;
       let maxX = -Infinity;
       let minY = Infinity;
       let maxY = -Infinity;
-      for (const [x, y] of corners) {
-        const point = this.point.set(x, 0, y).project(this.camera);
+      for (const corner of corners) {
+        const point = this.point.set(corner.x, 0, corner.y).project(this.camera);
         minX = Math.min(minX, point.x);
         maxX = Math.max(maxX, point.x);
         minY = Math.min(minY, point.y);
         maxY = Math.max(maxY, point.y);
       }
       const spanY = Math.max(0.01, maxY - minY);
-      offset -= ((maxY + minY) / 2) * (rect.height / spanY);
-      distance *= Math.max((maxX - minX) / 1.96, spanY / 1.9);
+      offset += ((maxY + minY) / 2) * (view.height / spanY);
+      distance *= Math.max((maxX - minX) / 1.98, spanY / 1.96);
     }
     this.fitDistance = Math.min(20000, Math.max(200, distance));
     this.fitOffset = offset;
-    this.place(rect.x, rect.y + offset, this.fitDistance);
+    this.place(view, offset, this.fitDistance);
   }
 
-  private place(x: number, y: number, distance: number): void {
-    this.camera.position.set(x, Math.sin(PITCH) * distance, y + Math.cos(PITCH) * distance);
+  // Looks at a point `offset` up the screen from its middle, from `distance` away, behind and above.
+  private place(view: ScreenView, offset: number, distance: number): void {
+    const forwardX = Math.cos(view.angle);
+    const forwardY = Math.sin(view.angle);
+    const x = view.x + forwardX * offset;
+    const y = view.y + forwardY * offset;
+    const back = Math.cos(PITCH) * distance;
+    this.camera.position.set(x - forwardX * back, Math.sin(PITCH) * distance, y - forwardY * back);
     this.camera.lookAt(x, 0, y);
     this.camera.updateMatrixWorld();
   }
@@ -509,7 +512,7 @@ function buildCar(colorIndex: number, shadowTexture: THREE.Texture): CarModel {
   const root = new THREE.Group();
   const body = new THREE.Group();
   // A touch bigger than the car's footprint in the game: chunky toys read better from up high.
-  root.scale.setScalar(1.2);
+  root.scale.setScalar(1.3);
   // The car tumbles about a point a little above the road.
   body.position.y = -8;
   root.add(body);

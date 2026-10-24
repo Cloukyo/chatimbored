@@ -1,3 +1,5 @@
+import type { ScreenView } from "./camera.js";
+
 // Wire types for Pile-Up, the top-down party racer. Shared by the server and the web client.
 // Everyone sees the same thing, so one view goes to every player.
 
@@ -107,8 +109,8 @@ export type RaceView = {
   target: number;
   // Increases every server tick, so the client can order and interpolate snapshots.
   tick: number;
-  // The shared screen in world units. A car that leaves it is out of the round.
-  view: { x: number; y: number; width: number; height: number };
+  // The shared screen on the ground, in world units, and which way the camera faces. A car that leaves it is out of the round.
+  view: ScreenView;
   // The screen is closing in, late in a round.
   shrinking: boolean;
   cars: RaceCar[];

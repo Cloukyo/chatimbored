@@ -43,7 +43,8 @@ let resuming = false;
 const me: Driver = { playerId: "", keys: "all", fires: 0, lastSent: "", lastSentAt: 0 };
 const seats: Seat[] = [];
 const held = new Set<string>();
-const touch = { left: false, right: false, brake: false };
+// rev: the brake button went down during the countdown, so it means gas until it is let go.
+const touch = { left: false, right: false, brake: false, rev: false };
 const padEdges = new PadEdges();
 const renderer = new RaceRenderer($<HTMLCanvasElement>("arena"), $<HTMLCanvasElement>("world"));
 const isTouch = matchMedia("(pointer: coarse)").matches;
@@ -311,6 +312,7 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("keyup", (event) => held.delete(event.code));
 window.addEventListener("blur", () => held.clear());
 
+const brakeButton = document.querySelector<HTMLButtonElement>('[data-touch="brake"]')!;
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-touch]")) {
   const key = button.dataset.touch as "left" | "right" | "brake" | "fire";
   const down = (event: PointerEvent) => {
@@ -321,11 +323,13 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-touch]"
       sendInput(me, true);
     } else {
       touch[key] = true;
+      if (key === "brake") touch.rev = lastRace?.phase === "countdown";
     }
   };
   const up = () => {
     button.classList.remove("held");
     if (key !== "fire") touch[key] = false;
+    if (key === "brake") touch.rev = false;
   };
   button.addEventListener("pointerdown", down);
   button.addEventListener("pointerup", up);
@@ -363,10 +367,14 @@ function readDriver(driver: Driver): { steer: number; throttle: number } {
   }
   if (driver === me && isTouch) {
     steer += (touch.right ? 1 : 0) - (touch.left ? 1 : 0);
-    // On a phone the gas is always down, so two thumbs are enough. Not once you're out: then it would drag the air-strike sight.
+    // On a phone the gas is always down once the race is on, so two thumbs are enough. Not once you're out: then it would
+    // drag the air-strike sight. During the countdown the brake button is the rev button instead, for a turbo start.
     const out = lastRace?.cars.find((car) => car.id === me.playerId)?.state === "out";
-    gas = Math.max(gas, touch.brake || out ? 0 : 1);
-    brake = Math.max(brake, touch.brake ? 1 : 0);
+    if (lastRace?.phase === "countdown" || touch.rev) gas = Math.max(gas, touch.brake ? 1 : 0);
+    else {
+      gas = Math.max(gas, touch.brake || out ? 0 : 1);
+      brake = Math.max(brake, touch.brake ? 1 : 0);
+    }
   }
   const pad = driver.pad === undefined ? undefined : readPad(driver.pad);
   if (pad) {
@@ -521,6 +529,7 @@ function applyGame(game: GameSnapshot): void {
   if (!game.race) return;
   lastRace = game.race;
   renderer.push(game.race);
+  brakeButton.textContent = game.race.phase === "countdown" ? "REV" : "BRAKE";
 }
 
 function leaveToLanding(): void {

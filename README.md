@@ -16,7 +16,7 @@ The current scaffold proves the core platform loop:
 ## Structure
 
 ```text
-client-web/     Browser client (TypeScript + Vite) for the crowd games
+client-web/     Browser clients (TypeScript + Vite): Morbid Masquerade in src/, the Pile-Up racer in race/
 client-godot/   Godot 4 client project for the other minigames
 server/         Node.js + TypeScript WebSocket server
 shared/         Message types, constants and crowd movement rules shared by server and clients
@@ -47,6 +47,8 @@ Then, in a second terminal, start the browser client and open http://localhost:5
 ```bash
 npm run web
 ```
+
+For Pile-Up, the party racer, run `npm run web:race` instead and open the address it prints.
 
 The Godot client (`client-godot/`) still runs Loot & Leave and Lucky Seven.
 

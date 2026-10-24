@@ -14,6 +14,7 @@ import {
 import { actNatural } from "./ActNatural.js";
 import { lootAndLeave } from "./LootAndLeave.js";
 import { luckySeven } from "./LuckySeven.js";
+import { pileUp } from "./PileUp.js";
 import { silentWitness } from "./SilentWitness.js";
 import type { Minigame } from "./Minigame.js";
 
@@ -47,3 +48,4 @@ registerMinigame(crowdFreezeFrame);
 registerMinigame(crowdHotParcel);
 registerMinigame(crowdClosingTime);
 registerMinigame(crowdLastDance);
+registerMinigame(pileUp);

@@ -34,7 +34,10 @@ export function parseClientMessage(raw: unknown): ClientMessage {
       if (message.minigameId !== undefined && typeof message.minigameId !== "string") {
         throw new Error("minigameId must be a string.");
       }
-      return { type: "START_GAME", minigameId: message.minigameId };
+      if (message.trackId !== undefined && (typeof message.trackId !== "string" || message.trackId.length > 32)) {
+        throw new Error("trackId must be a short string.");
+      }
+      return { type: "START_GAME", minigameId: message.minigameId, trackId: message.trackId };
     case "PLAYER_INPUT":
       if (message.input === "PRESS") return { type: "PLAYER_INPUT", input: "PRESS" };
       return { type: "PLAYER_INPUT", input: readPlayerInput(message.input) };
@@ -59,6 +62,16 @@ export function parseClientMessage(raw: unknown): ClientMessage {
 function readPlayerInput(value: unknown): PlayerInputPayload {
   if (!value || typeof value !== "object") throw new Error("Unsupported player input.");
   const input = value as Record<string, unknown>;
+  if (input.kind === "race") {
+    const fires = input.fires;
+    if (typeof fires !== "number" || !Number.isSafeInteger(fires) || fires < 0) throw new Error("Race input needs a whole number of fires.");
+    return {
+      kind: "race",
+      steer: clampUnit(typeof input.steer === "number" ? input.steer : 0),
+      throttle: clampUnit(typeof input.throttle === "number" ? input.throttle : 0),
+      fires,
+    };
+  }
   if (input.kind === "crowd") {
     const seq = readSequence(input.seq);
     if (seq === undefined) throw new Error("Crowd input needs a positive integer seq.");

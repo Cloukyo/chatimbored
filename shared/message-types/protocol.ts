@@ -1,5 +1,6 @@
 import type { CrowdInput, CrowdView } from "../crowd/protocol.js";
 import type { NightOptions, NightSnapshot, PerkKey } from "../party/night.js";
+import type { RaceInput, RaceView } from "../race/protocol.js";
 
 export const MESSAGE_TYPES = {
   CREATE_ROOM: "CREATE_ROOM",
@@ -57,6 +58,7 @@ export type GameSnapshot = {
   silentWitness?: SilentWitnessState;
   luckySeven?: LuckySevenState;
   crowd?: CrowdView;
+  race?: RaceView;
 };
 
 export type Vector2Payload = {
@@ -342,7 +344,8 @@ export type PlayerInputPayload =
   | LootAndLeaveInput
   | SilentWitnessInput
   | LuckySevenInput
-  | CrowdInput;
+  | CrowdInput
+  | RaceInput;
 
 export type ClientMessage =
   | { type: "CREATE_ROOM"; displayName: string }
@@ -352,7 +355,8 @@ export type ClientMessage =
   | { type: "RESUME"; token: string }
   | { type: "RENAME"; displayName: string }
   | { type: "PLAYER_READY"; isReady: boolean }
-  | { type: "START_GAME"; minigameId?: string }
+  // trackId: Pile-Up's track; left out, the server picks one.
+  | { type: "START_GAME"; minigameId?: string; trackId?: string }
   | { type: "PLAYER_INPUT"; input: PlayerInputPayload }
   | { type: "RETURN_TO_LOBBY" }
   // sharedScreen: everyone is watching one screen, so rooms that need secret words are left out.

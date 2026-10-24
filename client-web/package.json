@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:race": "vite race",
     "build": "tsc --noEmit && vite build",
+    "build:race": "tsc --noEmit && vite build race",
     "preview": "vite preview"
   },
   "devDependencies": {

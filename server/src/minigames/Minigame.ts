@@ -16,4 +16,6 @@ export type Minigame = {
   finish(room: Room): GameSnapshot;
   // Per-player view of the game, for games that hide information from some players.
   snapshotFor?(room: Room, playerId: string): GameSnapshot | undefined;
+  // Tick-driven games that change rarely: false skips this tick's broadcast.
+  shouldBroadcast?(room: Room): boolean;
 };

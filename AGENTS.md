@@ -42,6 +42,13 @@ Codex and VS Code should open the repo root, not only the Godot folder.
 - Every player gets a resume token in ROOM_STATE. A dropped socket marks the player away (an NPC brain walks their figure) and holds the seat for 90s; RESUME with the token takes it back. The web client keeps tokens in sessionStorage.
 - Sound is synthesised in `client-web/src/audio/sound.ts` (no audio files). Touch controls appear on coarse pointers.
 
+## Scribble Scrap
+
+- The drawing party game, served at `/scribble/` from `client-web/scribble/`. One minigame, `scribble_scrap` (`server/src/minigames/ScribbleScrap.ts`), runs three games: Roast Portraits, The Forger and Doodle Brawl, or all of them as a full night. The rules live in `server/src/scribble/ScribbleMatch.ts`, the prompts and cards in `server/src/scribble/cards.ts`, the protocol in `shared/scribble/protocol.ts`.
+- Couch play is Jackbox-style: one device joins as the TV (`screen: true` on CREATE_ROOM/JOIN_ROOM). A screen seat is always ready, doesn't count towards player limits, and never draws or votes. You can't draw with a gamepad, so players use their phones.
+- Snapshots go out only when `ScribbleMatch.version` changes (`Minigame.shouldBroadcast`). Drawings are sent to each device once (`art` in the view) and then referred to by id; a device that lost them sends `resend`.
+- The Forger's word must never reach the forger or a screen seat before the reveal.
+
 ## Couch Play
 
 - The web client supports several players on one screen with controllers. Each extra controller joins the room as its own player over its own WebSocket, so the server doesn't know or care.

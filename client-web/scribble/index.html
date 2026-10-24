@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Scribble Scrap · chatImbored</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Patrick+Hand&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="landing" class="screen card">
+        <div class="brand">
+          <p class="eyebrow">a <a href="/">chatImbored</a> game</p>
+          <h1>Scribble <span>Scrap</span></h1>
+          <p class="tagline">Draw your friends badly. Catch the forger. Win the doodle brawl.</p>
+        </div>
+        <label>Your name <input id="name" maxlength="24" autocomplete="nickname" placeholder="Display name" /></label>
+        <button id="create" class="primary">Create room</button>
+        <div class="row">
+          <input id="code" maxlength="5" placeholder="Room code" autocapitalize="characters" />
+          <button id="join">Join</button>
+        </div>
+        <label class="check"><input id="as-tv" type="checkbox" /> This device is the TV <small>It shows the game for everyone on the couch and doesn't play. Everyone joins on their phone.</small></label>
+        <button class="ghost" data-help>How to play</button>
+        <p id="landing-status" class="status" role="status"></p>
+      </section>
+
+      <section id="lobby" class="screen card wide" hidden>
+        <header class="row spread">
+          <h2>Room <span id="room-code" class="code"></span></h2>
+          <div class="row">
+            <button class="ghost" data-help>How to play</button>
+            <button id="copy-link">Copy invite link</button>
+            <button id="leave" class="ghost">Leave</button>
+          </div>
+        </header>
+        <p id="join-hint" class="join-hint"></p>
+        <ul id="players" class="players"></ul>
+        <h3>What are we playing?</h3>
+        <div id="modes" class="modes"></div>
+        <label class="check"><input id="blind" type="checkbox" checked /> Blind rounds <small>In the second Roast you can't see your own lines while drawing.</small></label>
+        <div class="row">
+          <button id="ready">Ready</button>
+          <button id="start" class="primary">Start</button>
+        </div>
+        <p id="lobby-status" class="status" role="status"></p>
+      </section>
+
+      <section id="game" class="screen game" hidden>
+        <header class="bar">
+          <div class="where"><span id="part"></span><strong id="title"></strong></div>
+          <div id="timer" class="timer"></div>
+          <button id="skip" class="ghost small" hidden>Skip ahead</button>
+        </header>
+        <ul id="chips" class="chips"></ul>
+        <div id="stage" class="stage"></div>
+      </section>
+
+      <section id="results" class="screen card wide" hidden>
+        <h2 id="results-title"></h2>
+        <ol id="standings" class="standings"></ol>
+        <button id="back-to-lobby" class="primary">Back to lobby</button>
+        <p id="results-wait" class="muted">Waiting for the host.</p>
+      </section>
+    </main>
+    <dialog id="help" class="help card wide">
+      <header class="row spread">
+        <h2>How to play</h2>
+        <button id="help-close" class="ghost">Close</button>
+      </header>
+      <p>Everyone draws on their own phone or computer. Playing on one couch? Open this page on the TV, tick <b>This device is the TV</b> and create the room, then everyone joins with the code on their phone.</p>
+      <h3>Roast Portraits</h3>
+      <p>You get a prompt about someone in the room, like "Sal on their worst first date". Draw it. Then you write a caption for someone else's drawing, and everyone votes for the best drawing and the best caption (not your own). <b>100 points</b> per vote. In a <b>blind round</b> your page stays blank while you draw, and the drawings play back stroke by stroke at the reveal.</p>
+      <h3>The Forger</h3>
+      <p>Everyone gets the same secret word, except the forger, who only knows the category. Take turns adding <b>one stroke</b> each to a shared picture, twice round. Don't make it too obvious, or the forger will work out the word. Then vote for the forger. If they get away, they score <b>400</b>. If they're caught, they get one guess at the word for <b>250</b>; if they miss, every artist scores <b>150</b>. Spotting the forger is worth <b>50</b>.</p>
+      <h3>Doodle Brawl</h3>
+      <p>Pick one card from each hand, like "A grandma" and "with a jetpack", then draw your fighter and give it a name. Fighters go head to head and everyone else votes for who would win. The winner stays on for the next challenger. <b>100</b> per win and <b>200</b> for the last one standing. A tie is a coin flip.</p>
+    </dialog>
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

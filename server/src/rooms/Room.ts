@@ -50,19 +50,18 @@ export class Room {
 
   canStart(playerId: string, minigame: Minigame): boolean {
     return (
-      this.everyoneReadyForHost(playerId) &&
-      this.players.length >= minigame.minPlayers &&
+      this.everyoneReadyForHost(playerId, minigame.minPlayers) &&
       this.players.length <= minigame.maxPlayers
     );
   }
 
-  // Lobby, asked by the host, enough players, and everyone else ready.
-  everyoneReadyForHost(playerId: string): boolean {
+  // Lobby, asked by the host, enough players, and everyone else ready. A game that works solo passes a lower minimum.
+  everyoneReadyForHost(playerId: string, minPlayers = MIN_PLAYERS): boolean {
     const readyCount = this.players.filter((player) => player.isReady || player.isHost).length;
     return (
       this.hostId === playerId &&
       this.phase === "lobby" &&
-      this.players.length >= MIN_PLAYERS &&
+      this.players.length >= minPlayers &&
       readyCount === this.players.length
     );
   }

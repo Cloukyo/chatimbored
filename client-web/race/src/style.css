@@ -30,7 +30,8 @@ body {
   padding: 16px;
 }
 
-[hidden] {
+[hidden],
+dialog:not([open]) {
   display: none !important;
 }
 

@@ -45,7 +45,7 @@ const seats: Seat[] = [];
 const held = new Set<string>();
 const touch = { left: false, right: false, brake: false };
 const padEdges = new PadEdges();
-const renderer = new RaceRenderer($<HTMLCanvasElement>("arena"));
+const renderer = new RaceRenderer($<HTMLCanvasElement>("arena"), $<HTMLCanvasElement>("world"));
 const isTouch = matchMedia("(pointer: coarse)").matches;
 
 const serverUrl = resolveServerUrl();

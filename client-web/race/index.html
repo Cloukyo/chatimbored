@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Pile-Up · chatImbored</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <main id="app">
+      <section id="landing" class="screen card">
+        <div class="brand">
+          <p class="eyebrow">a <a href="/">chatImbored</a> game</p>
+          <h1>Pile&#8209;Up!</h1>
+          <p class="tagline">Tiny cars. One screen. Don't fall off the back.</p>
+        </div>
+        <label>Your name <input id="name" maxlength="24" autocomplete="nickname" placeholder="Display name" /></label>
+        <button id="create" class="primary">Create room</button>
+        <div class="row">
+          <input id="code" maxlength="5" placeholder="Room code" autocapitalize="characters" />
+          <button id="join">Join</button>
+        </div>
+        <button class="ghost" data-help>How to play</button>
+        <p id="landing-status" class="status" role="status"></p>
+      </section>
+
+      <section id="lobby" class="screen card wide" hidden>
+        <header class="row spread">
+          <h2>Room <span id="room-code"></span></h2>
+          <div class="row">
+            <button class="ghost" data-help>How to play</button>
+            <button id="copy-link">Copy invite link</button>
+            <button id="leave" class="ghost">Leave</button>
+          </div>
+        </header>
+        <ul id="players" class="players"></ul>
+        <div class="couch">
+          <p class="muted">Same screen? Press <b>A</b> on a controller, or <b>Enter</b> for a second player on the arrow keys, to add a driver. Empty seats are filled with bots.</p>
+          <button id="claim-pad" class="ghost">Drive with a controller myself</button>
+        </div>
+        <h3>Track</h3>
+        <div id="tracks" class="tracks"></div>
+        <div class="row">
+          <button id="ready">Ready</button>
+          <button id="start" class="primary">Start the race</button>
+        </div>
+        <p id="lobby-status" class="status" role="status"></p>
+      </section>
+
+      <section id="game" class="screen game" hidden>
+        <canvas id="arena"></canvas>
+        <div id="touch" class="touch" hidden>
+          <div class="touch-left">
+            <button data-touch="left" aria-label="Steer left">◀</button>
+            <button data-touch="right" aria-label="Steer right">▶</button>
+          </div>
+          <div class="touch-right">
+            <button data-touch="brake" aria-label="Brake">BRAKE</button>
+            <button data-touch="fire" class="fire" aria-label="Fire">FIRE</button>
+          </div>
+        </div>
+        <div id="results" class="results card" hidden>
+          <h2 id="results-title"></h2>
+          <ol id="standings" class="players"></ol>
+          <button id="back-to-lobby" class="primary">Back to lobby</button>
+          <p id="results-wait" class="muted">Waiting for the host.</p>
+        </div>
+      </section>
+    </main>
+    <dialog id="help" class="help card wide">
+      <header class="row spread">
+        <h2>How to play</h2>
+        <button id="help-close" class="ghost">Close</button>
+      </header>
+      <p>Everyone races on one shared screen that follows whoever is in front. Fall off the back of the screen, or off the track, and you're out of the round. The last car left wins the round and a point. The first car out loses one. First to five points wins.</p>
+      <p>Grab the <b>?</b> crates for weapons: rockets, mines, oil, shockwaves and nitro. Shove people into the scenery. Late in a round the screen starts to shrink, so somebody always goes.</p>
+      <table class="controls">
+        <thead><tr><th></th><th>Keyboard</th><th>Second keyboard player</th><th>Controller</th><th>Phone</th></tr></thead>
+        <tbody>
+          <tr><th>Steer</th><td>A / D</td><td>← / →</td><td>Left stick or d-pad</td><td>◀ ▶</td></tr>
+          <tr><th>Gas</th><td>W</td><td>↑</td><td>RT or A</td><td>Always on</td></tr>
+          <tr><th>Brake / reverse</th><td>S</td><td>↓</td><td>LT or B</td><td>BRAKE</td></tr>
+          <tr><th>Fire</th><td>Space</td><td>Enter or right Shift</td><td>X or RB</td><td>FIRE</td></tr>
+        </tbody>
+      </table>
+      <p class="muted">Playing alone on the keyboard, the arrow keys and Enter work too.</p>
+    </dialog>
+    <div id="toast" class="toast" hidden></div>
+    <button id="mute" class="mute ghost" aria-label="Sound on or off">🔊</button>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

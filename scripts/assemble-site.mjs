@@ -2,6 +2,7 @@
 //   /          the chatImbored hub (hub/index.html)
 //   /classic/  the Godot Web export (client-godot/builds/web/)
 //   /play/     Morbid Masquerade, built into dist/play by the next step of vercel-build
+//   /race/     Pile-Up, built into dist/race by the step after that
 import { cpSync, rmSync } from "node:fs";
 import { join } from "node:path";
 

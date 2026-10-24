@@ -11,6 +11,8 @@ export class Room {
   phase: RoomSnapshot["phase"] = "lobby";
   game?: GameSnapshot;
   night?: PartyNight;
+  // Choices from START_GAME that a minigame reads in setup, such as Pile-Up's track.
+  gameOptions?: { trackId?: string };
   private endTimer?: NodeJS.Timeout;
   private tickTimer?: NodeJS.Timeout;
   private lastTickAt = 0;

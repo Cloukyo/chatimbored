@@ -47,6 +47,13 @@ Codex and VS Code should open the repo root, not only the Godot folder.
 - The web client supports several players on one screen with controllers. Each extra controller joins the room as its own player over its own WebSocket, so the server doesn't know or care.
 - A shared screen must not mark anyone: no "you" tag, no own-figure prediction, no private HUD lines. Secrets reach couch players through controller rumble (`client-web/src/input/pads.ts`). Modes and layers that need private words (Marked, contracts, the Mole, the Glimpse perk) are left out on a shared screen.
 
+## Pile-Up
+
+- A top-down party racer in the spirit of Mashed: everyone shares one screen that follows the leader, and a car that drops off the screen or off the track is out of the round. Last car left scores a point, the first one out loses one, first to 5 wins.
+- The server runs it: `server/src/race/RaceMatch.ts` (cars, weapons, camera, rounds), `server/src/race/bot.ts` (bots fill the grid up to 4 cars and drive for anyone whose connection drops), `server/src/minigames/PileUp.ts` (the minigame, id `pile_up`). Tracks and the wire types are in `shared/race/`, so the client draws the same road the server drives on.
+- The client is its own page, `client-web/race/` (`npm run web:race`), served at `/race/`. It reuses `client-web/src/net.ts` and `client-web/src/input/pads.ts`. Couch play works the same way as Morbid Masquerade: each extra controller, or a second keyboard player on the arrow keys, joins as its own player over its own socket.
+- Keep it slapstick: bouncy collisions, blasts that throw cars into the air, comic popups and the cartoon exit for knocked-out cars are the point of the game, not polish to trim.
+
 ## Minigame Module Rules
 
 - Each minigame must expose an id, name, min/max player counts, setup/start or update behavior, input handling, and finish behavior.

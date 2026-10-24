@@ -54,6 +54,11 @@
         transition: transform 0.15s, border-color 0.15s;
       }
       .feature:hover, .feature:focus-visible { transform: translateY(-2px); border-color: var(--accent); }
+      .feature + .feature { margin-top: 16px; }
+      .feature.racer { background: linear-gradient(135deg, #4a3a1c 0%, #2a322f 70%); border-color: #7a6030; }
+      .feature.racer svg { fill: #ffcf3f; }
+      .feature.racer svg circle { fill: #fff; }
+      .feature.racer svg circle.pupil { fill: #111; }
       .feature svg { width: 140px; fill: var(--accent); }
       .feature svg ellipse { fill: #3a2a3c; }
       .feature h3 { margin: 0 0 6px; font: 700 1.9rem/1.1 Georgia, "Times New Roman", serif; }
@@ -118,6 +123,26 @@
           <path d="M4 6c8-4 18-4 28 3 10-7 20-7 28-3 1 10-3 20-12 22-7 1-11-4-16-4s-9 5-16 4C7 26 3 16 4 6z" />
           <ellipse cx="19" cy="15" rx="6.5" ry="4" />
           <ellipse cx="45" cy="15" rx="6.5" ry="4" />
+        </svg>
+      </a>
+
+      <a class="feature racer" href="/race/">
+        <div>
+          <h3>Pile-Up!</h3>
+          <p>Tiny cars, one shared screen and a lot of explosions. Fall off the back of the screen and you're out. Last car left takes the round.</p>
+          <div class="tags">
+            <span class="tag">2 to 8 players, bots fill the grid</span>
+            <span class="tag">Online or one screen</span>
+            <span class="tag">Keyboard, controllers and phones</span>
+          </div>
+          <span class="play">Play now</span>
+        </div>
+        <svg viewBox="0 0 64 36" aria-hidden="true">
+          <rect x="4" y="8" width="56" height="22" rx="9" stroke="#000" stroke-width="2" />
+          <circle cx="42" cy="15" r="6" stroke="#000" stroke-width="1.5" />
+          <circle cx="53" cy="15" r="6" stroke="#000" stroke-width="1.5" />
+          <circle class="pupil" cx="44" cy="17" r="2.6" />
+          <circle class="pupil" cx="51" cy="13" r="2.6" />
         </svg>
       </a>
 

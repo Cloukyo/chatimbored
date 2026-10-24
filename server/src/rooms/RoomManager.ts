@@ -115,6 +115,7 @@ export class RoomManager {
       const minigame = minigameId === LAST_DANCE_ID ? undefined : getMinigame(minigameId);
       if (!minigame) throw new Error("Unknown minigame.");
       if (!room.canStart(playerId, minigame)) throw new Error("Only the host can start when all players are ready.");
+      room.gameOptions = { trackId: message.trackId };
       room.start(minigame, () => onGameFinished(room), () => onGameTick?.(room));
       return room;
     }

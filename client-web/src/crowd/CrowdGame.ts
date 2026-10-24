@@ -24,6 +24,7 @@ import {
   paintFloor,
   toWorld,
 } from "./draw.js";
+import { CrowdScene } from "./scene3d.js";
 import { HOST_TRICKS } from "../../../shared/party/night.js";
 import { sound } from "../audio/sound.js";
 import { CUES, PAD, PadEdges, padAim, padMove, pressed, readPad, rumble } from "../input/pads.js";
@@ -68,6 +69,7 @@ const FLOOR_STYLES: Record<CrowdView["mode"], FloorStyle> = {
   last_dance: "ballroom",
 };
 
+type Tag = { figure: Figure; label: string; color: string };
 type Snapshot = { time: number; figures: Map<number, Figure> };
 type Pending = { seq: number; direction: CrowdVector; run: boolean };
 type Effect =
@@ -124,6 +126,20 @@ const CONTROLS = {
 const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
 const STICK_RADIUS = 52;
 
+// One 3D scene per canvas, kept between rounds so its shaders and models are only built once.
+// Null when the browser has no WebGL and the game draws in 2D instead.
+const scenes = new WeakMap<HTMLCanvasElement, CrowdScene | null>();
+
+function sceneFor(canvas: HTMLCanvasElement): CrowdScene | undefined {
+  if (!scenes.has(canvas)) scenes.set(canvas, CrowdScene.create(canvas, !TOUCH) ?? null);
+  return scenes.get(canvas) ?? undefined;
+}
+
+// Heights above the floor, in the scene's units, for things drawn over the figures.
+const SHOT_HEIGHT = 1.1;
+const BUMP_HEIGHT = 2.4;
+const TAG_HEIGHT = 2.9;
+
 function controlsFor(source: InputSource): (typeof CONTROLS)["keyboard"] {
   return source.kind === "pad" ? CONTROLS.pad : TOUCH ? CONTROLS.touch : CONTROLS.keyboard;
 }
@@ -155,6 +171,9 @@ export class CrowdGame {
   private inputTimer?: number;
   private frame?: number;
   private readonly abort = new AbortController();
+  private readonly scene?: CrowdScene;
+  // Shots, name tags and "!"s sit on a 2D canvas over the 3D one.
+  private readonly overlay?: HTMLCanvasElement;
 
   // `shared`: several people are watching this one screen, so nobody's figure, role or secrets are shown.
   constructor(
@@ -166,6 +185,12 @@ export class CrowdGame {
   ) {
     this.seats = seats.map((seat) => ({ seat, seq: 0, pendingAct: false, cued: false, mineCount: 0, alive: true, lastPulse: 0, lastInvitePulse: 0 }));
     const signal = this.abort.signal;
+    this.scene = sceneFor(canvas);
+    if (this.scene) {
+      this.overlay = document.createElement("canvas");
+      this.overlay.className = "arena-overlay";
+      canvas.after(this.overlay);
+    }
     window.addEventListener("keydown", (event) => this.onKey(event, true), { signal });
     window.addEventListener("keyup", (event) => this.onKey(event, false), { signal });
     window.addEventListener("blur", () => this.keys.clear(), { signal });
@@ -175,11 +200,11 @@ export class CrowdGame {
       (event) => {
         const keyboard = this.keyboardSeat();
         if (event.button !== 0 || !keyboard) return;
-        keyboard.pendingShot = toWorld(this.viewport, this.canvasPoint(event));
+        keyboard.pendingShot = this.arenaPoint(event);
       },
       { signal },
     );
-    canvas.addEventListener("pointermove", (event) => (this.pointer = toWorld(this.viewport, this.canvasPoint(event))), { signal });
+    canvas.addEventListener("pointermove", (event) => (this.pointer = this.arenaPoint(event)), { signal });
     canvas.addEventListener("pointerleave", () => (this.pointer = undefined), { signal });
     canvas.addEventListener("contextmenu", (event) => event.preventDefault(), { signal });
     this.resize();
@@ -248,6 +273,8 @@ export class CrowdGame {
 
   destroy(): void {
     this.touchControls?.remove();
+    this.overlay?.remove();
+    this.scene?.clear();
     sound.setCrowd(false);
     sound.setTense(false);
     this.abort.abort();
@@ -268,7 +295,8 @@ export class CrowdGame {
     if (state !== this.seats[0]) return;
 
     const now = performance.now();
-    if (!this.floor || this.floorMode !== view.mode) {
+    if (this.scene) this.scene.setRoom(FLOOR_STYLES[view.mode], view.arena);
+    else if (!this.floor || this.floorMode !== view.mode) {
       this.floor = paintFloor(view.arena, FLOOR_STYLES[view.mode]);
       this.floorMode = view.mode;
     }
@@ -602,41 +630,29 @@ export class CrowdGame {
     return Math.max(0, Math.ceil((this.endsAt - Date.now()) / 1000));
   }
 
+  // The 3D scene sizes its own canvas as it renders.
   private resize(): void {
+    if (this.scene) return;
     const ratio = window.devicePixelRatio || 1;
     this.canvas.width = Math.round(this.canvas.clientWidth * ratio);
     this.canvas.height = Math.round(this.canvas.clientHeight * ratio);
   }
 
-  private canvasPoint(event: PointerEvent): CrowdVector {
+  // Where on the floor a click or tap landed.
+  private arenaPoint(event: PointerEvent): CrowdVector | undefined {
     const rect = this.canvas.getBoundingClientRect();
+    if (this.scene) return this.scene.toArena({ x: event.clientX - rect.left, y: event.clientY - rect.top });
     const ratio = this.canvas.width / rect.width;
-    return { x: (event.clientX - rect.left) * ratio, y: (event.clientY - rect.top) * ratio };
+    return toWorld(this.viewport, { x: (event.clientX - rect.left) * ratio, y: (event.clientY - rect.top) * ratio });
   }
 
   private render(now: number): void {
-    const ctx = this.canvas.getContext("2d")!;
     const view = this.view;
-    ctx.fillStyle = "#1d2321";
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    const timer = this.hud.querySelector<HTMLElement>("[data-timer]");
-    if (timer) {
-      const seconds = this.secondsLeft();
-      timer.textContent = `${seconds}s`;
-      timer.classList.toggle("urgent", seconds <= 10 && !view?.result);
-      if (seconds !== this.lastSecond && view && !view.result) {
-        this.lastSecond = seconds;
-        if (seconds <= 10 && seconds > 0) sound.play("tick");
-        sound.setTense(seconds <= 15);
-      }
+    this.updateTimer(view);
+    if (!view) {
+      if (!this.scene) this.clear2d();
+      return;
     }
-    if (!view || !this.floor) return;
-
-    this.viewport = fitArena(this.canvas.width, this.canvas.height, view.arena, this.hudSpace() * (window.devicePixelRatio || 1));
-    ctx.save();
-    ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
-    ctx.scale(this.viewport.scale, this.viewport.scale);
-    ctx.drawImage(this.floor, 0, 0);
 
     const figures = this.interpolated(now);
     const self = this.shared ? undefined : figures.get(view.you);
@@ -654,14 +670,111 @@ export class CrowdGame {
         self.state = this.predicted.moving ? (this.predicted.running ? CROWD_STATE.RUN : CROWD_STATE.WALK) : CROWD_STATE.IDLE;
       }
     }
+    this.effects = this.effects.filter((effect) => now - effect.born < EFFECT_MS[effect.kind]);
+    if (this.scene) this.render3d(this.scene, view, figures, self, now);
+    else this.render2d(view, figures, self, now);
+  }
 
-    // On a shared screen nobody's lanterns are "theirs", so none are drawn as lit-by-you.
-    const mine = this.shared ? [] : view.mine;
-    for (const prop of view.props) {
-      const flaredAt = this.flares.get(prop.id);
-      const flare = flaredAt === undefined ? 0 : Math.max(0, 1 - (now - flaredAt) / FLARE_EFFECT_MS);
-      drawProp(ctx, prop, mine.includes(prop.id), flare, now);
+  private updateTimer(view: CrowdView | undefined): void {
+    const timer = this.hud.querySelector<HTMLElement>("[data-timer]");
+    if (!timer) return;
+    const seconds = this.secondsLeft();
+    timer.textContent = `${seconds}s`;
+    timer.classList.toggle("urgent", seconds <= 10 && !view?.result);
+    if (seconds !== this.lastSecond && view && !view.result) {
+      this.lastSecond = seconds;
+      if (seconds <= 10 && seconds > 0) sound.play("tick");
+      sound.setTense(seconds <= 15);
     }
+  }
+
+  // On a shared screen nobody's lanterns are "theirs", so none are drawn as lit-by-you.
+  private mineShown(view: CrowdView): number[] {
+    return this.shared ? [] : view.mine;
+  }
+
+  private flareOf(id: number, now: number): number {
+    const flaredAt = this.flares.get(id);
+    return flaredAt === undefined ? 0 : Math.max(0, 1 - (now - flaredAt) / FLARE_EFFECT_MS);
+  }
+
+  private render3d(scene: CrowdScene, view: CrowdView, figures: Map<number, Figure>, self: Figure | undefined, now: number): void {
+    const width = this.canvas.clientWidth;
+    const height = this.canvas.clientHeight;
+    scene.resize(width, height, this.hudSpace());
+    scene.syncFigures(figures.values(), now, self?.id);
+    scene.syncProps(view.props, this.mineShown(view), (id) => this.flareOf(id, now), now);
+    scene.setZone(view.zone);
+
+    // Things that lie on the floor are painted onto it.
+    const hint = view.hud.hint && !view.result && !this.shared ? view.hud.hint : undefined;
+    const crosshairs = view.result ? [] : this.crosshairs();
+    const floorEffects = this.effects.filter((effect) => effect.kind === "puff" || effect.kind === "strike");
+    const painted = hint || view.zone || crosshairs.length > 0 || floorEffects.length > 0;
+    scene.paintGround(
+      painted
+        ? (ctx) => {
+            if (hint) drawHint(ctx, hint, view.arena, now);
+            if (view.zone) drawDarkness(ctx, view.zone, view.arena);
+            for (const effect of floorEffects) {
+              if (effect.kind === "shot" || effect.kind === "bump") continue;
+              const age = (now - effect.born) / EFFECT_MS[effect.kind];
+              if (effect.kind === "strike") drawStrike(ctx, effect.at, age);
+              else drawPuff(ctx, effect.at, age);
+            }
+            for (const crosshair of crosshairs) drawCrosshair(ctx, crosshair.at, crosshair.ready);
+          }
+        : undefined,
+    );
+    scene.render();
+
+    // The rest floats over the figures, so it is drawn flat over the picture.
+    const overlay = this.overlay!;
+    const ratio = window.devicePixelRatio || 1;
+    if (overlay.width !== Math.round(width * ratio) || overlay.height !== Math.round(height * ratio)) {
+      overlay.width = Math.round(width * ratio);
+      overlay.height = Math.round(height * ratio);
+    }
+    const ctx = overlay.getContext("2d")!;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    // The 2D helpers draw a little above the point they are given; these offsets undo that.
+    for (const effect of this.effects) {
+      const age = (now - effect.born) / EFFECT_MS[effect.kind];
+      if (effect.kind === "shot") {
+        const from = scene.project(effect.from, SHOT_HEIGHT);
+        const to = scene.project(effect.to, SHOT_HEIGHT);
+        drawShot(ctx, { x: from.x, y: from.y + 18 }, { x: to.x, y: to.y + 18 }, age);
+      } else if (effect.kind === "bump") {
+        const at = scene.project(effect.at, BUMP_HEIGHT);
+        drawBump(ctx, { x: at.x, y: at.y + 52 }, age);
+      }
+    }
+    for (const tag of this.tags(view, figures, self)) {
+      const at = scene.project(tag.figure, TAG_HEIGHT);
+      drawNameTag(ctx, { ...tag.figure, x: at.x, y: at.y + 52 }, tag.label, tag.color);
+    }
+  }
+
+  private clear2d(): void {
+    const ctx = this.canvas.getContext("2d")!;
+    ctx.fillStyle = "#0f080a";
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  private render2d(view: CrowdView, figures: Map<number, Figure>, self: Figure | undefined, now: number): void {
+    this.clear2d();
+    if (!this.floor) return;
+    const ctx = this.canvas.getContext("2d")!;
+    this.viewport = fitArena(this.canvas.width, this.canvas.height, view.arena, this.hudSpace() * (window.devicePixelRatio || 1));
+    ctx.save();
+    ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
+    ctx.scale(this.viewport.scale, this.viewport.scale);
+    ctx.drawImage(this.floor, 0, 0);
+
+    const mine = this.mineShown(view);
+    for (const prop of view.props) drawProp(ctx, prop, mine.includes(prop.id), this.flareOf(prop.id, now), now);
     if (view.hud.hint && !view.result && !this.shared) drawHint(ctx, view.hud.hint, view.arena, now);
 
     const ordered = [...figures.values()].sort((a, b) => a.y - b.y);
@@ -669,7 +782,6 @@ export class CrowdGame {
 
     if (view.zone) drawDarkness(ctx, view.zone, view.arena);
 
-    this.effects = this.effects.filter((effect) => now - effect.born < EFFECT_MS[effect.kind]);
     for (const effect of this.effects) {
       const age = (now - effect.born) / EFFECT_MS[effect.kind];
       if (effect.kind === "shot") drawShot(ctx, effect.from, effect.to, age);
@@ -678,6 +790,14 @@ export class CrowdGame {
       else drawPuff(ctx, effect.at, age);
     }
 
+    for (const tag of this.tags(view, figures, self)) drawNameTag(ctx, tag.figure, tag.label, tag.color);
+    if (!view.result) for (const crosshair of this.crosshairs()) drawCrosshair(ctx, crosshair.at, crosshair.ready);
+    ctx.restore();
+  }
+
+  // Names over heads: everyone's at the reveal, otherwise only your own and what you've earned the right to see.
+  private tags(view: CrowdView, figures: Map<number, Figure>, self: Figure | undefined): Tag[] {
+    const tags: Tag[] = [];
     if (view.result) {
       for (const entry of view.result.reveal) {
         const figure = figures.get(entry.entity);
@@ -685,37 +805,25 @@ export class CrowdGame {
         const won = entry.playerId === view.result.winnerPlayerId || entry.role === view.result.winnerRole;
         const color = entry.role === "killer" ? "#e9806b" : won ? "#e0a64a" : "#ece6d6";
         const suffix = entry.role === "killer" ? " (Killer)" : entry.role === "ringer" ? " (Ringer)" : "";
-        const label = `${this.nameOf(entry.playerId)}${suffix}`;
-        drawNameTag(ctx, figure, label, color);
+        tags.push({ figure, label: `${this.nameOf(entry.playerId)}${suffix}`, color });
       }
-    } else {
-      if (self) drawNameTag(ctx, self, view.ghost ? "Your ghost" : "You", "#e0a64a");
-      if (!this.shared) this.drawPartyTags(ctx, view, figures);
-      this.drawCrosshairs(ctx);
+      return tags;
     }
-    ctx.restore();
-  }
-
-  // A bought glimpse, or the host's overhead view of where the players are. Never on a shared screen.
-  private drawPartyTags(ctx: CanvasRenderingContext2D, view: CrowdView, figures: Map<number, Figure>): void {
-    const party = view.party;
-    if (!party) return;
-    const glimpse = party.glimpse !== undefined ? figures.get(party.glimpse) : undefined;
-    if (glimpse) drawNameTag(ctx, glimpse, "A player", "#6ba3e9");
-    for (const id of party.players ?? []) {
-      const figure = figures.get(id);
-      if (figure) drawNameTag(ctx, figure, "Player", "#e8d26a");
-    }
+    if (self) tags.push({ figure: self, label: view.ghost ? "Your ghost" : "You", color: "#e0a64a" });
+    if (!this.shared) tags.push(...partyTags(view, figures));
+    return tags;
   }
 
   // Lookouts and the host aim from above, so their crosshairs are the only thing of theirs on screen.
-  private drawCrosshairs(ctx: CanvasRenderingContext2D): void {
+  private crosshairs(): Array<{ at: CrowdVector; ready: boolean }> {
+    const crosshairs: Array<{ at: CrowdVector; ready: boolean }> = [];
     for (const state of this.seats) {
       const view = state.view;
       if (!view || !aimsFromAbove(view)) continue;
       const at = state.seat.source.kind === "keyboard" ? this.pointer : state.cursor;
-      if (at) drawCrosshair(ctx, at, canShoot(view));
+      if (at) crosshairs.push({ at, ready: canShoot(view) });
     }
+    return crosshairs;
   }
 
   private interpolated(now: number): Map<number, Figure> {
@@ -746,6 +854,20 @@ export class CrowdGame {
     }
     return result;
   }
+}
+
+// A bought glimpse, or the host's overhead view of where the players are. Never on a shared screen.
+function partyTags(view: CrowdView, figures: Map<number, Figure>): Tag[] {
+  const party = view.party;
+  if (!party) return [];
+  const tags: Tag[] = [];
+  const glimpse = party.glimpse !== undefined ? figures.get(party.glimpse) : undefined;
+  if (glimpse) tags.push({ figure: glimpse, label: "A player", color: "#6ba3e9" });
+  for (const id of party.players ?? []) {
+    const figure = figures.get(id);
+    if (figure) tags.push({ figure, label: "Player", color: "#e8d26a" });
+  }
+  return tags;
 }
 
 // What a shared screen can say: the goal and anything everyone can already see. Roles and secrets are felt through rumble.

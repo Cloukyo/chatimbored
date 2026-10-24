@@ -21,18 +21,18 @@ export class RoomManager {
   private readonly resumeTokens = new Map<string, string>();
   private readonly tokenOwners = new Map<string, string>();
 
-  createRoom(displayName: string): { room: Room; player: Player } {
+  createRoom(displayName: string, screen = false): { room: Room; player: Player } {
     const room = new Room(this.createRoomCode());
-    const player = this.createPlayer(displayName);
+    const player = this.createPlayer(displayName, screen);
     room.addPlayer(player);
     this.rooms.set(room.code, room);
     this.playerRooms.set(player.id, room.code);
     return { room, player };
   }
 
-  joinRoom(roomCode: string, displayName: string): { room: Room; player: Player } {
+  joinRoom(roomCode: string, displayName: string, screen = false): { room: Room; player: Player } {
     const room = this.mustFindRoom(roomCode);
-    const player = this.createPlayer(displayName);
+    const player = this.createPlayer(displayName, screen);
     room.addPlayer(player);
     this.playerRooms.set(player.id, room.code);
     return { room, player };
@@ -106,6 +106,7 @@ export class RoomManager {
     if (!room) throw new Error("Create or join a room first.");
 
     if (message.type === "PLAYER_READY") {
+      if (room.players.find((player) => player.id === playerId)?.screen) return room;
       room.setReady(playerId, message.isReady);
       return room;
     }
@@ -115,7 +116,7 @@ export class RoomManager {
       const minigame = minigameId === LAST_DANCE_ID ? undefined : getMinigame(minigameId);
       if (!minigame) throw new Error("Unknown minigame.");
       if (!room.canStart(playerId, minigame)) throw new Error("Only the host can start when all players are ready.");
-      room.gameOptions = { trackId: message.trackId };
+      room.gameOptions = { trackId: message.trackId, scribbleMode: message.scribbleMode, blind: message.blind };
       room.start(minigame, () => onGameFinished(room), () => onGameTick?.(room));
       return room;
     }
@@ -215,8 +216,9 @@ export class RoomManager {
     return room;
   }
 
-  private createPlayer(displayName: string): Player {
-    const player = { id: randomUUID(), displayName, isHost: false, isReady: false, score: 0 };
+  private createPlayer(displayName: string, screen = false): Player {
+    // A TV seat is always ready: nobody is holding it.
+    const player: Player = { id: randomUUID(), displayName, isHost: false, isReady: screen, score: 0, ...(screen ? { screen } : {}) };
     const token = randomUUID();
     this.resumeTokens.set(player.id, token);
     this.tokenOwners.set(token, player.id);

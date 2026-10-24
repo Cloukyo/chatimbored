@@ -33,7 +33,7 @@ wss.on("connection", (socket) => {
       const message = parseClientMessage(JSON.parse(data.toString()));
 
       if (message.type === MESSAGE_TYPES.CREATE_ROOM) {
-        const result = manager.createRoom(message.displayName);
+        const result = manager.createRoom(message.displayName, message.screen);
         playerId = result.player.id;
         sockets.set(playerId, socket);
         broadcastRoom(result.room);
@@ -41,7 +41,7 @@ wss.on("connection", (socket) => {
       }
 
       if (message.type === MESSAGE_TYPES.JOIN_ROOM) {
-        const result = manager.joinRoom(message.roomCode, message.displayName);
+        const result = manager.joinRoom(message.roomCode, message.displayName, message.screen);
         playerId = result.player.id;
         sockets.set(playerId, socket);
         broadcastRoom(result.room);
@@ -125,6 +125,8 @@ function gameFor(room: Room, playerId: string, shared = room.snapshot().game): G
 }
 
 function broadcastTick(room: Room): void {
+  // Games that change rarely say when there's something new to send.
+  if (room.phase === "in_game" && getMinigame(room.selectedMinigameId)?.shouldBroadcast?.(room) === false) return;
   if (!isTickBroadcastOnly(room)) {
     broadcastRoom(room);
     return;

@@ -8,7 +8,9 @@
     "dev:race": "vite race",
     "build": "tsc --noEmit && vite build",
     "build:race": "tsc --noEmit && vite build race",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:scribble": "vite scribble",
+    "build:scribble": "tsc --noEmit && vite build scribble"
   },
   "devDependencies": {
     "typescript": "^5.5.3",

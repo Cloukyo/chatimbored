@@ -5,4 +5,5 @@ export type Player = {
   isReady: boolean;
   score: number;
   away?: boolean;
+  screen?: boolean;
 };

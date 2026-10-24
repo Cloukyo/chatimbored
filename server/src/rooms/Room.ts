@@ -2,6 +2,7 @@ import { ACT_NATURAL_TICK_MS, DEFAULT_MINIGAME_ID, MAX_PLAYERS, MIN_PLAYERS } fr
 import type { GameSnapshot, RoomSnapshot } from "../../../shared/message-types/protocol.js";
 import type { Minigame } from "../minigames/Minigame.js";
 import type { PartyNight } from "../party/PartyNight.js";
+import type { ScribbleMode } from "../../../shared/scribble/protocol.js";
 import type { Player } from "./Player.js";
 
 export class Room {
@@ -12,7 +13,7 @@ export class Room {
   game?: GameSnapshot;
   night?: PartyNight;
   // Choices from START_GAME that a minigame reads in setup, such as Pile-Up's track.
-  gameOptions?: { trackId?: string };
+  gameOptions?: { trackId?: string; scribbleMode?: ScribbleMode; blind?: boolean };
   private endTimer?: NodeJS.Timeout;
   private tickTimer?: NodeJS.Timeout;
   private lastTickAt = 0;
@@ -26,7 +27,8 @@ export class Room {
   }
 
   addPlayer(player: Player): void {
-    if (this.players.length >= MAX_PLAYERS) throw new Error("Room is full.");
+    // A TV seat doesn't take a player's place.
+    if (!player.screen && this.players.filter((other) => !other.screen).length >= MAX_PLAYERS) throw new Error("Room is full.");
     if (this.phase !== "lobby") throw new Error("Game already in progress.");
     player.isHost = this.players.length === 0;
     this.players.push(player);
@@ -57,11 +59,13 @@ export class Room {
 
   // Lobby, asked by the host, enough players, and everyone else ready. A game that works solo passes a lower minimum.
   everyoneReadyForHost(playerId: string, minPlayers = MIN_PLAYERS): boolean {
-    const readyCount = this.players.filter((player) => player.isReady || player.isHost).length;
+    const readyCount = this.players.filter((player) => player.isReady || player.isHost || player.screen).length;
+    // A TV seat doesn't count as a player.
+    const playing = this.players.filter((player) => !player.screen).length;
     return (
       this.hostId === playerId &&
       this.phase === "lobby" &&
-      this.players.length >= minPlayers &&
+      playing >= minPlayers &&
       readyCount === this.players.length
     );
   }

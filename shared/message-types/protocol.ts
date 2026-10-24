@@ -1,6 +1,7 @@
 import type { CrowdInput, CrowdView } from "../crowd/protocol.js";
 import type { NightOptions, NightSnapshot, PerkKey } from "../party/night.js";
 import type { RaceInput, RaceView } from "../race/protocol.js";
+import type { ScribbleInput, ScribbleMode, ScribbleView } from "../scribble/protocol.js";
 
 export const MESSAGE_TYPES = {
   CREATE_ROOM: "CREATE_ROOM",
@@ -32,6 +33,8 @@ export type PlayerSnapshot = {
   score: number;
   // Lost their connection and has a little while to come back to the same seat.
   away?: boolean;
+  // A shared TV for a drawing game: shows the reveals, never draws or votes.
+  screen?: boolean;
 };
 
 // Everything but "lobby", "in_game" and "results" only happens during a Party Night.
@@ -59,6 +62,7 @@ export type GameSnapshot = {
   luckySeven?: LuckySevenState;
   crowd?: CrowdView;
   race?: RaceView;
+  scribble?: ScribbleView;
 };
 
 export type Vector2Payload = {
@@ -345,18 +349,20 @@ export type PlayerInputPayload =
   | SilentWitnessInput
   | LuckySevenInput
   | CrowdInput
-  | RaceInput;
+  | RaceInput
+  | ScribbleInput;
 
 export type ClientMessage =
-  | { type: "CREATE_ROOM"; displayName: string }
-  | { type: "JOIN_ROOM"; roomCode: string; displayName: string }
+  // screen: this device is the shared TV for Scribble Scrap, not a player.
+  | { type: "CREATE_ROOM"; displayName: string; screen?: boolean }
+  | { type: "JOIN_ROOM"; roomCode: string; displayName: string; screen?: boolean }
   | { type: "LEAVE_ROOM" }
   // Take back a seat after a refresh or a dropped connection.
   | { type: "RESUME"; token: string }
   | { type: "RENAME"; displayName: string }
   | { type: "PLAYER_READY"; isReady: boolean }
-  // trackId: Pile-Up's track; left out, the server picks one.
-  | { type: "START_GAME"; minigameId?: string; trackId?: string }
+  // trackId: Pile-Up's track; left out, the server picks one. scribbleMode and blind: Scribble Scrap's choices.
+  | { type: "START_GAME"; minigameId?: string; trackId?: string; scribbleMode?: ScribbleMode; blind?: boolean }
   | { type: "PLAYER_INPUT"; input: PlayerInputPayload }
   | { type: "RETURN_TO_LOBBY" }
   // sharedScreen: everyone is watching one screen, so rooms that need secret words are left out.

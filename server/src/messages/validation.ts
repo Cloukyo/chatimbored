@@ -1,6 +1,19 @@
 import type { ClientMessage, PlayerInputPayload } from "../../../shared/message-types/protocol.js";
 import { NIGHT_LAYERS, NIGHT_LENGTHS, PERKS, type NightLength, type NightOptions, type PerkKey } from "../../../shared/party/night.js";
 import type { NightAction } from "../../../shared/message-types/protocol.js";
+import {
+  BRUSHES,
+  CANVAS_H,
+  CANVAS_W,
+  INK,
+  MAX_STROKE_POINTS,
+  MAX_STROKES,
+  MAX_TEXT,
+  MODES,
+  type ScribbleInput,
+  type ScribbleMode,
+  type Stroke,
+} from "../../../shared/scribble/protocol.js";
 
 const MAX_NAME_LENGTH = 24;
 
@@ -13,12 +26,13 @@ export function parseClientMessage(raw: unknown): ClientMessage {
 
   switch (message.type) {
     case "CREATE_ROOM":
-      return { type: "CREATE_ROOM", displayName: readDisplayName(message.displayName) };
+      return { type: "CREATE_ROOM", displayName: readDisplayName(message.displayName), screen: message.screen === true || undefined };
     case "JOIN_ROOM":
       return {
         type: "JOIN_ROOM",
         roomCode: readRoomCode(message.roomCode),
         displayName: readDisplayName(message.displayName),
+        screen: message.screen === true || undefined,
       };
     case "LEAVE_ROOM":
       return { type: "LEAVE_ROOM" };
@@ -37,7 +51,16 @@ export function parseClientMessage(raw: unknown): ClientMessage {
       if (message.trackId !== undefined && (typeof message.trackId !== "string" || message.trackId.length > 32)) {
         throw new Error("trackId must be a short string.");
       }
-      return { type: "START_GAME", minigameId: message.minigameId, trackId: message.trackId };
+      if (message.scribbleMode !== undefined && !MODES.some((mode) => mode.key === message.scribbleMode)) {
+        throw new Error("Unknown Scribble Scrap mode.");
+      }
+      return {
+        type: "START_GAME",
+        minigameId: message.minigameId,
+        trackId: message.trackId,
+        scribbleMode: message.scribbleMode as ScribbleMode | undefined,
+        blind: typeof message.blind === "boolean" ? message.blind : undefined,
+      };
     case "PLAYER_INPUT":
       if (message.input === "PRESS") return { type: "PLAYER_INPUT", input: "PRESS" };
       return { type: "PLAYER_INPUT", input: readPlayerInput(message.input) };
@@ -72,6 +95,7 @@ function readPlayerInput(value: unknown): PlayerInputPayload {
       fires,
     };
   }
+  if (input.kind === "scribble") return readScribbleInput(input);
   if (input.kind === "crowd") {
     const seq = readSequence(input.seq);
     if (seq === undefined) throw new Error("Crowd input needs a positive integer seq.");
@@ -107,6 +131,50 @@ function readPlayerInput(value: unknown): PlayerInputPayload {
     run: input.run === true,
     kill: input.kill === true,
   };
+}
+
+function readScribbleInput(input: Record<string, unknown>): ScribbleInput {
+  const text = (value: unknown) => {
+    if (typeof value !== "string") throw new Error("text must be a string.");
+    return value.slice(0, MAX_TEXT * 2);
+  };
+  switch (input.action) {
+    case "drawing": {
+      if (!Array.isArray(input.strokes) || input.strokes.length > MAX_STROKES) throw new Error("A drawing is a list of strokes.");
+      return { kind: "scribble", action: "drawing", strokes: input.strokes.map(readStroke), name: input.name === undefined ? undefined : text(input.name) };
+    }
+    case "text":
+      return { kind: "scribble", action: "text", text: text(input.text) };
+    case "vote":
+      if (!["drawing", "caption", "suspect", "fighter"].includes(input.slot as string)) throw new Error("Unknown vote.");
+      if (typeof input.target !== "string" || input.target.length > 64) throw new Error("target must be a string.");
+      return { kind: "scribble", action: "vote", slot: input.slot as "drawing", target: input.target };
+    case "pick":
+      if (!Number.isSafeInteger(input.who) || !Number.isSafeInteger(input.with)) throw new Error("Pick two cards.");
+      return { kind: "scribble", action: "pick", who: input.who as number, with: input.with as number };
+    case "stroke":
+      return { kind: "scribble", action: "stroke", stroke: readStroke(input.stroke), done: input.done === true };
+    case "resend":
+    case "skip":
+      return { kind: "scribble", action: input.action };
+    default:
+      throw new Error("Unknown Scribble Scrap action.");
+  }
+}
+
+function readStroke(value: unknown): Stroke {
+  if (!value || typeof value !== "object") throw new Error("A stroke must be an object.");
+  const stroke = value as Record<string, unknown>;
+  const c = stroke.c;
+  const b = stroke.b;
+  if (!Number.isSafeInteger(c) || (c as number) < 0 || (c as number) >= INK.length) throw new Error("Unknown ink.");
+  if (!Number.isSafeInteger(b) || (b as number) < 0 || (b as number) >= BRUSHES.length) throw new Error("Unknown brush.");
+  if (!Array.isArray(stroke.p) || stroke.p.length % 2 !== 0 || stroke.p.length > MAX_STROKE_POINTS * 2) throw new Error("Bad stroke points.");
+  const p = stroke.p.map((value, index) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("Bad stroke points.");
+    return Math.max(0, Math.min(index % 2 === 0 ? CANVAS_W : CANVAS_H, Math.round(value)));
+  });
+  return { c: c as number, b: b as number, p };
 }
 
 function readNightOptions(value: unknown): Partial<NightOptions> | undefined {

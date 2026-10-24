@@ -297,7 +297,7 @@ test("Bell Ringers: Lookouts aren't in the crowd and shoot where they click", ()
   clearCrowd(match);
   ringer.entity.x = 600;
   ringer.entity.y = 400;
-  send(crowdBellRingers, room, lookout.playerId, { shoot: { x: 603, y: 382 } });
+  send(crowdBellRingers, room, lookout.playerId, { shoot: { x: 603, y: 409 } });
   assert.equal(ringer.entity.dead, true);
   assert.equal(room.game!.winnerId, "lookouts");
   crowdBellRingers.finish(room);

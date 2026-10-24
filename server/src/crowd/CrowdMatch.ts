@@ -17,9 +17,8 @@ import { type Random, shuffle } from "./random.js";
 const MAX_QUEUED_INPUTS = 4;
 const EVENT_WINDOW_TICKS = 40;
 const ENTITY_RADIUS = 14;
-// Aimed shots from above hit whoever's body is under the cursor; bodies are drawn about 20px above the feet.
+// Aimed shots from above hit whoever stands within this of the floor point aimed at.
 const AIMED_HIT_RADIUS = 16;
-const BODY_HEIGHT = 20;
 
 export type CrowdEntity = {
   id: number;
@@ -502,15 +501,16 @@ export class CrowdMatch {
     if (best) this.withActor(slot, () => this.rules.onShotHit(this, slot, best!.entity));
   }
 
-  // An arrow from above: drops on the clicked point and hits the closest body under it.
+  // An arrow from above: drops on the floor point aimed at and hits whoever stands closest to it.
+  // Clients turn a click on someone's figure into the point at their feet.
   private aimedShot(slot: CrowdSlot, target: CrowdVector): void {
     let best: { entity: CrowdEntity; distance: number } | undefined;
     for (const entity of this.entities) {
       if (entity.dead || entity.hidden) continue;
-      const distance = Math.hypot(entity.x - target.x, entity.y - BODY_HEIGHT - target.y);
+      const distance = Math.hypot(entity.x - target.x, entity.y - target.y);
       if (distance <= AIMED_HIT_RADIUS && (!best || distance < best.distance)) best = { entity, distance };
     }
-    const to = best ? { x: best.entity.x, y: best.entity.y } : { x: target.x, y: target.y + BODY_HEIGHT };
+    const to = best ? { x: best.entity.x, y: best.entity.y } : { x: target.x, y: target.y };
     this.emit({ type: "shot", from: { x: to.x - 60, y: -40 }, to });
     this.options.observer?.onShot?.(this, slot, to, to, best?.entity);
     if (best) this.withActor(slot, () => this.rules.onShotHit(this, slot, best!.entity));

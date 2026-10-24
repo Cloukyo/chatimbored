@@ -139,6 +139,9 @@ function sceneFor(canvas: HTMLCanvasElement): CrowdScene | undefined {
 const SHOT_HEIGHT = 1.1;
 const BUMP_HEIGHT = 2.4;
 const TAG_HEIGHT = 2.9;
+// How tall a standing figure is: in scene units, and in arena pixels in the 2D drawing.
+const FIGURE_HEIGHT_3D = 2.1;
+const FIGURE_HEIGHT_2D = 44;
 
 function controlsFor(source: InputSource): (typeof CONTROLS)["keyboard"] {
   return source.kind === "pad" ? CONTROLS.pad : TOUCH ? CONTROLS.touch : CONTROLS.keyboard;
@@ -200,7 +203,7 @@ export class CrowdGame {
       (event) => {
         const keyboard = this.keyboardSeat();
         if (event.button !== 0 || !keyboard) return;
-        keyboard.pendingShot = this.arenaPoint(event);
+        keyboard.pendingShot = this.aimPoint(event);
       },
       { signal },
     );
@@ -638,6 +641,39 @@ export class CrowdGame {
     this.canvas.height = Math.round(this.canvas.clientHeight * ratio);
   }
 
+  // A click on someone's figure aims at their feet, which is where the server looks for them,
+  // at the newest position this screen has for them. Anywhere else aims at the floor under the cursor.
+  private aimPoint(event: PointerEvent): CrowdVector | undefined {
+    const floor = this.arenaPoint(event);
+    const latest = this.snapshots[this.snapshots.length - 1];
+    if (!this.view || !latest) return floor;
+    const rect = this.canvas.getBoundingClientRect();
+    const click = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const own = this.keyboardSeat()?.view?.you;
+    let best: { id: number; distance: number } | undefined;
+    for (const figure of this.interpolated(performance.now()).values()) {
+      if (figure.id === own || figure.state === CROWD_STATE.DEAD) continue;
+      const { feet, head, reach } = this.figureOnScreen(figure, rect);
+      const distance = distanceToSegment(click, feet, head);
+      if (distance <= reach && (!best || distance < best.distance)) best = { id: figure.id, distance };
+    }
+    const target = best && latest.figures.get(best.id);
+    return target ? { x: target.x, y: target.y } : floor;
+  }
+
+  // Where a figure stands on screen, in CSS pixels: feet, top of the head, and how far either side of that line counts as on them.
+  private figureOnScreen(figure: Figure, rect: DOMRect): { feet: CrowdVector; head: CrowdVector; reach: number } {
+    if (this.scene) {
+      const feet = this.scene.project(figure, 0);
+      const head = this.scene.project(figure, FIGURE_HEIGHT_3D);
+      return { feet, head, reach: Math.max(8, Math.hypot(head.x - feet.x, head.y - feet.y) * 0.3) };
+    }
+    const toCss = rect.width / this.canvas.width;
+    const scale = this.viewport.scale * toCss;
+    const feet = { x: this.viewport.offsetX * toCss + figure.x * scale, y: this.viewport.offsetY * toCss + figure.y * scale };
+    return { feet, head: { x: feet.x, y: feet.y - FIGURE_HEIGHT_2D * scale }, reach: 12 * scale };
+  }
+
   // Where on the floor a click or tap landed.
   private arenaPoint(event: PointerEvent): CrowdVector | undefined {
     const rect = this.canvas.getBoundingClientRect();
@@ -930,6 +966,14 @@ function unpack(packed: number[]): Map<number, Figure> {
     figures.set(id, { id, x: packed[index + 1], y: packed[index + 2], facing: packed[index + 3], state: packed[index + 4] as CrowdEntityState });
   }
   return figures;
+}
+
+function distanceToSegment(point: CrowdVector, start: CrowdVector, end: CrowdVector): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared > 0 ? Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared)) : 0;
+  return Math.hypot(point.x - (start.x + dx * t), point.y - (start.y + dy * t));
 }
 
 function lerp(from: number, to: number, t: number): number {

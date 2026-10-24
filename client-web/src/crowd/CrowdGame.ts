@@ -226,6 +226,7 @@ export class CrowdGame {
     this.frame = requestAnimationFrame(loop);
     sound.play("start");
     sound.setCrowd(true);
+    sound.setScene("round");
     if (TOUCH && !shared) this.addTouchControls(signal);
   }
 
@@ -284,6 +285,7 @@ export class CrowdGame {
   destroy(): void {
     this.touchControls?.remove();
     this.overlay?.remove();
+    sound.setScene("lobby");
     this.scene?.clear();
     sound.setCrowd(false);
     sound.setTense(false);
@@ -305,6 +307,7 @@ export class CrowdGame {
     if (state !== this.seats[0]) return;
 
     const now = performance.now();
+    if (view.mode === "last_dance") sound.setScene("finale");
     if (this.scene) this.scene.setRoom(FLOOR_STYLES[view.mode], view.arena);
     else if (!this.floor || this.floorMode !== view.mode) {
       this.floor = paintFloor(view.arena, FLOOR_STYLES[view.mode]);

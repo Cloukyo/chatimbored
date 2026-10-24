@@ -24,6 +24,7 @@ import {
   paintFloor,
   toWorld,
 } from "./draw.js";
+import { CrowdScene } from "./scene3d.js";
 import { HOST_TRICKS } from "../../../shared/party/night.js";
 import { sound } from "../audio/sound.js";
 import { CUES, PAD, PadEdges, padAim, padMove, pressed, readPad, rumble } from "../input/pads.js";
@@ -68,6 +69,9 @@ const FLOOR_STYLES: Record<CrowdView["mode"], FloorStyle> = {
   last_dance: "ballroom",
 };
 
+// Who a shot is at: the figure pointed at, if any, and the floor point under the pointer.
+type Shot = { at: CrowdVector; id?: number };
+type Tag = { figure: Figure; label: string; color: string };
 type Snapshot = { time: number; figures: Map<number, Figure> };
 type Pending = { seq: number; direction: CrowdVector; run: boolean };
 type Effect =
@@ -85,6 +89,11 @@ const KEYS = {
 
 // How far ahead of a controller player their shot is aimed, along the stick or the way they face.
 const PAD_SHOT_REACH = 400;
+// A controller shot picks the person nearest the stick's line within this angle either side, and this far away.
+const PAD_SHOT_CONE = Math.PI / 7;
+const PAD_SHOT_RANGE = 900;
+// A controller Lookout's cursor picks whoever is within this of it.
+const PAD_CURSOR_REACH = 40;
 const PAD_CURSOR_SPEED = 900;
 const PULSE_MS = { holding: 1000, holdingLate: 500, dark: 450, invite: 3000 };
 
@@ -103,7 +112,7 @@ type SeatState = {
   seat: GameSeat;
   view?: CrowdView;
   seq: number;
-  pendingShot?: CrowdVector;
+  pendingShot?: Shot;
   pendingAct: boolean;
   // A controller Lookout aims with an on-screen cursor instead of the mouse.
   cursor?: CrowdVector;
@@ -123,6 +132,23 @@ const CONTROLS = {
 // Phones and tablets: a stick and two buttons on screen, and a tap on the crowd shoots.
 const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
 const STICK_RADIUS = 52;
+
+// One 3D scene per canvas, kept between rounds so its shaders and models are only built once.
+// Null when the browser has no WebGL and the game draws in 2D instead.
+const scenes = new WeakMap<HTMLCanvasElement, CrowdScene | null>();
+
+function sceneFor(canvas: HTMLCanvasElement): CrowdScene | undefined {
+  if (!scenes.has(canvas)) scenes.set(canvas, CrowdScene.create(canvas, !TOUCH) ?? null);
+  return scenes.get(canvas) ?? undefined;
+}
+
+// Heights above the floor, in the scene's units, for things drawn over the figures.
+const SHOT_HEIGHT = 1.1;
+const BUMP_HEIGHT = 2.4;
+const TAG_HEIGHT = 2.9;
+// How tall a standing figure is: in scene units, and in arena pixels in the 2D drawing.
+const FIGURE_HEIGHT_3D = 2.1;
+const FIGURE_HEIGHT_2D = 44;
 
 function controlsFor(source: InputSource): (typeof CONTROLS)["keyboard"] {
   return source.kind === "pad" ? CONTROLS.pad : TOUCH ? CONTROLS.touch : CONTROLS.keyboard;
@@ -155,6 +181,9 @@ export class CrowdGame {
   private inputTimer?: number;
   private frame?: number;
   private readonly abort = new AbortController();
+  private readonly scene?: CrowdScene;
+  // Shots, name tags and "!"s sit on a 2D canvas over the 3D one.
+  private readonly overlay?: HTMLCanvasElement;
 
   // `shared`: several people are watching this one screen, so nobody's figure, role or secrets are shown.
   constructor(
@@ -166,6 +195,12 @@ export class CrowdGame {
   ) {
     this.seats = seats.map((seat) => ({ seat, seq: 0, pendingAct: false, cued: false, mineCount: 0, alive: true, lastPulse: 0, lastInvitePulse: 0 }));
     const signal = this.abort.signal;
+    this.scene = sceneFor(canvas);
+    if (this.scene) {
+      this.overlay = document.createElement("canvas");
+      this.overlay.className = "arena-overlay";
+      canvas.after(this.overlay);
+    }
     window.addEventListener("keydown", (event) => this.onKey(event, true), { signal });
     window.addEventListener("keyup", (event) => this.onKey(event, false), { signal });
     window.addEventListener("blur", () => this.keys.clear(), { signal });
@@ -175,11 +210,11 @@ export class CrowdGame {
       (event) => {
         const keyboard = this.keyboardSeat();
         if (event.button !== 0 || !keyboard) return;
-        keyboard.pendingShot = toWorld(this.viewport, this.canvasPoint(event));
+        keyboard.pendingShot = this.aimPoint(event);
       },
       { signal },
     );
-    canvas.addEventListener("pointermove", (event) => (this.pointer = toWorld(this.viewport, this.canvasPoint(event))), { signal });
+    canvas.addEventListener("pointermove", (event) => (this.pointer = this.arenaPoint(event)), { signal });
     canvas.addEventListener("pointerleave", () => (this.pointer = undefined), { signal });
     canvas.addEventListener("contextmenu", (event) => event.preventDefault(), { signal });
     this.resize();
@@ -191,6 +226,7 @@ export class CrowdGame {
     this.frame = requestAnimationFrame(loop);
     sound.play("start");
     sound.setCrowd(true);
+    sound.setScene("round");
     if (TOUCH && !shared) this.addTouchControls(signal);
   }
 
@@ -248,6 +284,9 @@ export class CrowdGame {
 
   destroy(): void {
     this.touchControls?.remove();
+    this.overlay?.remove();
+    sound.setScene("lobby");
+    this.scene?.clear();
     sound.setCrowd(false);
     sound.setTense(false);
     this.abort.abort();
@@ -268,7 +307,9 @@ export class CrowdGame {
     if (state !== this.seats[0]) return;
 
     const now = performance.now();
-    if (!this.floor || this.floorMode !== view.mode) {
+    if (view.mode === "last_dance") sound.setScene("finale");
+    if (this.scene) this.scene.setRoom(FLOOR_STYLES[view.mode], view.arena);
+    else if (!this.floor || this.floorMode !== view.mode) {
       this.floor = paintFloor(view.arena, FLOOR_STYLES[view.mode]);
       this.floorMode = view.mode;
     }
@@ -377,7 +418,10 @@ export class CrowdGame {
     // After a reconnect the server has already seen higher numbers than this fresh page.
     state.seq = Math.max(state.seq, view.ack) + 1;
     const input: CrowdInput = { kind: "crowd", seq: state.seq, move, run, act: state.pendingAct };
-    if (state.pendingShot && canShoot(view)) input.shoot = roundPoint(state.pendingShot);
+    if (state.pendingShot && canShoot(view)) {
+      input.shoot = roundPoint(state.pendingShot.at);
+      if (state.pendingShot.id !== undefined) input.shootAt = state.pendingShot.id;
+    }
     state.pendingShot = undefined;
     state.pendingAct = false;
     state.seat.send(input);
@@ -411,15 +455,35 @@ export class CrowdGame {
     };
   }
 
-  // Controller shots fly along the right stick, or the way the figure faces if the stick is idle.
-  private padShotTarget(state: SeatState, view: CrowdView, pad: Gamepad): CrowdVector | undefined {
-    if (aimsFromAbove(view)) return state.cursor;
+  // Controller shots go to whoever is nearest the right stick's direction (or the way the figure faces if the stick is idle).
+  // A Lookout's cursor picks whoever is nearest it.
+  private padShotTarget(state: SeatState, view: CrowdView, pad: Gamepad): Shot | undefined {
+    const latest = this.snapshots[this.snapshots.length - 1];
+    const candidates = latest ? [...latest.figures.values()].filter((figure) => figure.id !== view.you && figure.state !== CROWD_STATE.DEAD) : [];
+    if (aimsFromAbove(view)) {
+      if (!state.cursor) return undefined;
+      const cursor = state.cursor;
+      const nearest = closest(candidates, (figure) => {
+        const distance = Math.hypot(figure.x - cursor.x, figure.y - cursor.y);
+        return distance <= PAD_CURSOR_REACH ? distance : undefined;
+      });
+      return nearest ? { at: { x: nearest.x, y: nearest.y }, id: nearest.id } : { at: cursor };
+    }
     const self = this.latestFigure(view.you);
     if (!self) return undefined;
     const from = !this.shared && this.predicted ? this.predicted.to : self;
     const aim = padAim(pad);
     const angle = aim.x !== 0 || aim.y !== 0 ? Math.atan2(aim.y, aim.x) : (self.facing * Math.PI) / 4;
-    return { x: from.x + Math.cos(angle) * PAD_SHOT_REACH, y: from.y + Math.sin(angle) * PAD_SHOT_REACH };
+    const nearest = closest(candidates, (figure) => {
+      const distance = Math.hypot(figure.x - from.x, figure.y - from.y);
+      let off = Math.abs(Math.atan2(figure.y - from.y, figure.x - from.x) - angle);
+      if (off > Math.PI) off = Math.PI * 2 - off;
+      if (distance < 1 || distance > PAD_SHOT_RANGE || off > PAD_SHOT_CONE) return undefined;
+      // Mostly whoever is closest to the line, with a nudge toward nearer people.
+      return off + distance / PAD_SHOT_RANGE / 10;
+    });
+    if (nearest) return { at: { x: nearest.x, y: nearest.y }, id: nearest.id };
+    return { at: { x: from.x + Math.cos(angle) * PAD_SHOT_REACH, y: from.y + Math.sin(angle) * PAD_SHOT_REACH } };
   }
 
   private selfFrozen(): boolean {
@@ -587,7 +651,7 @@ export class CrowdGame {
         ];
       case "last_dance":
         return view.role === "backer"
-          ? ["You're backing a finalist", "Steer your guest to get in the way"]
+          ? ["You're backing a finalist", "Steer your guest to crowd round your finalist"]
           : ["Hit the other finalist to win the night", shot("them"), "A miss makes nearby guests flinch", "The floor is shrinking"];
     }
   }
@@ -602,41 +666,63 @@ export class CrowdGame {
     return Math.max(0, Math.ceil((this.endsAt - Date.now()) / 1000));
   }
 
+  // The 3D scene sizes its own canvas as it renders.
   private resize(): void {
+    if (this.scene) return;
     const ratio = window.devicePixelRatio || 1;
     this.canvas.width = Math.round(this.canvas.clientWidth * ratio);
     this.canvas.height = Math.round(this.canvas.clientHeight * ratio);
   }
 
-  private canvasPoint(event: PointerEvent): CrowdVector {
+  // A click on someone's figure shoots them, named by id with the newest position this screen has for them.
+  // A click on empty floor shoots at the floor, which hits whoever the server finds standing there.
+  private aimPoint(event: PointerEvent): Shot | undefined {
+    const floor = this.arenaPoint(event);
+    const latest = this.snapshots[this.snapshots.length - 1];
+    if (!floor) return undefined;
+    if (!this.view || !latest) return { at: floor };
     const rect = this.canvas.getBoundingClientRect();
+    const click = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const own = this.keyboardSeat()?.view?.you;
+    let best: { id: number; distance: number } | undefined;
+    for (const figure of this.interpolated(performance.now()).values()) {
+      if (figure.id === own || figure.state === CROWD_STATE.DEAD) continue;
+      const { feet, head, reach } = this.figureOnScreen(figure, rect);
+      const distance = distanceToSegment(click, feet, head);
+      if (distance <= reach && (!best || distance < best.distance)) best = { id: figure.id, distance };
+    }
+    const target = best && latest.figures.get(best.id);
+    return target ? { at: { x: target.x, y: target.y }, id: target.id } : { at: floor };
+  }
+
+  // Where a figure stands on screen, in CSS pixels: feet, top of the head, and how far either side of that line counts as on them.
+  private figureOnScreen(figure: Figure, rect: DOMRect): { feet: CrowdVector; head: CrowdVector; reach: number } {
+    if (this.scene) {
+      const feet = this.scene.project(figure, 0);
+      const head = this.scene.project(figure, FIGURE_HEIGHT_3D);
+      return { feet, head, reach: Math.max(8, Math.hypot(head.x - feet.x, head.y - feet.y) * 0.3) };
+    }
+    const toCss = rect.width / this.canvas.width;
+    const scale = this.viewport.scale * toCss;
+    const feet = { x: this.viewport.offsetX * toCss + figure.x * scale, y: this.viewport.offsetY * toCss + figure.y * scale };
+    return { feet, head: { x: feet.x, y: feet.y - FIGURE_HEIGHT_2D * scale }, reach: 12 * scale };
+  }
+
+  // Where on the floor a click or tap landed.
+  private arenaPoint(event: PointerEvent): CrowdVector | undefined {
+    const rect = this.canvas.getBoundingClientRect();
+    if (this.scene) return this.scene.toArena({ x: event.clientX - rect.left, y: event.clientY - rect.top });
     const ratio = this.canvas.width / rect.width;
-    return { x: (event.clientX - rect.left) * ratio, y: (event.clientY - rect.top) * ratio };
+    return toWorld(this.viewport, { x: (event.clientX - rect.left) * ratio, y: (event.clientY - rect.top) * ratio });
   }
 
   private render(now: number): void {
-    const ctx = this.canvas.getContext("2d")!;
     const view = this.view;
-    ctx.fillStyle = "#1d2321";
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    const timer = this.hud.querySelector<HTMLElement>("[data-timer]");
-    if (timer) {
-      const seconds = this.secondsLeft();
-      timer.textContent = `${seconds}s`;
-      timer.classList.toggle("urgent", seconds <= 10 && !view?.result);
-      if (seconds !== this.lastSecond && view && !view.result) {
-        this.lastSecond = seconds;
-        if (seconds <= 10 && seconds > 0) sound.play("tick");
-        sound.setTense(seconds <= 15);
-      }
+    this.updateTimer(view);
+    if (!view) {
+      if (!this.scene) this.clear2d();
+      return;
     }
-    if (!view || !this.floor) return;
-
-    this.viewport = fitArena(this.canvas.width, this.canvas.height, view.arena, this.hudSpace() * (window.devicePixelRatio || 1));
-    ctx.save();
-    ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
-    ctx.scale(this.viewport.scale, this.viewport.scale);
-    ctx.drawImage(this.floor, 0, 0);
 
     const figures = this.interpolated(now);
     const self = this.shared ? undefined : figures.get(view.you);
@@ -654,14 +740,111 @@ export class CrowdGame {
         self.state = this.predicted.moving ? (this.predicted.running ? CROWD_STATE.RUN : CROWD_STATE.WALK) : CROWD_STATE.IDLE;
       }
     }
+    this.effects = this.effects.filter((effect) => now - effect.born < EFFECT_MS[effect.kind]);
+    if (this.scene) this.render3d(this.scene, view, figures, self, now);
+    else this.render2d(view, figures, self, now);
+  }
 
-    // On a shared screen nobody's lanterns are "theirs", so none are drawn as lit-by-you.
-    const mine = this.shared ? [] : view.mine;
-    for (const prop of view.props) {
-      const flaredAt = this.flares.get(prop.id);
-      const flare = flaredAt === undefined ? 0 : Math.max(0, 1 - (now - flaredAt) / FLARE_EFFECT_MS);
-      drawProp(ctx, prop, mine.includes(prop.id), flare, now);
+  private updateTimer(view: CrowdView | undefined): void {
+    const timer = this.hud.querySelector<HTMLElement>("[data-timer]");
+    if (!timer) return;
+    const seconds = this.secondsLeft();
+    timer.textContent = `${seconds}s`;
+    timer.classList.toggle("urgent", seconds <= 10 && !view?.result);
+    if (seconds !== this.lastSecond && view && !view.result) {
+      this.lastSecond = seconds;
+      if (seconds <= 10 && seconds > 0) sound.play("tick");
+      sound.setTense(seconds <= 15);
     }
+  }
+
+  // On a shared screen nobody's lanterns are "theirs", so none are drawn as lit-by-you.
+  private mineShown(view: CrowdView): number[] {
+    return this.shared ? [] : view.mine;
+  }
+
+  private flareOf(id: number, now: number): number {
+    const flaredAt = this.flares.get(id);
+    return flaredAt === undefined ? 0 : Math.max(0, 1 - (now - flaredAt) / FLARE_EFFECT_MS);
+  }
+
+  private render3d(scene: CrowdScene, view: CrowdView, figures: Map<number, Figure>, self: Figure | undefined, now: number): void {
+    const width = this.canvas.clientWidth;
+    const height = this.canvas.clientHeight;
+    scene.resize(width, height, this.hudSpace());
+    scene.syncFigures(figures.values(), now, self?.id);
+    scene.syncProps(view.props, this.mineShown(view), (id) => this.flareOf(id, now), now);
+    scene.setZone(view.zone);
+
+    // Things that lie on the floor are painted onto it.
+    const hint = view.hud.hint && !view.result && !this.shared ? view.hud.hint : undefined;
+    const crosshairs = view.result ? [] : this.crosshairs();
+    const floorEffects = this.effects.filter((effect) => effect.kind === "puff" || effect.kind === "strike");
+    const painted = hint || view.zone || crosshairs.length > 0 || floorEffects.length > 0;
+    scene.paintGround(
+      painted
+        ? (ctx) => {
+            if (hint) drawHint(ctx, hint, view.arena, now);
+            if (view.zone) drawDarkness(ctx, view.zone, view.arena);
+            for (const effect of floorEffects) {
+              if (effect.kind === "shot" || effect.kind === "bump") continue;
+              const age = (now - effect.born) / EFFECT_MS[effect.kind];
+              if (effect.kind === "strike") drawStrike(ctx, effect.at, age);
+              else drawPuff(ctx, effect.at, age);
+            }
+            for (const crosshair of crosshairs) drawCrosshair(ctx, crosshair.at, crosshair.ready);
+          }
+        : undefined,
+    );
+    scene.render();
+
+    // The rest floats over the figures, so it is drawn flat over the picture.
+    const overlay = this.overlay!;
+    const ratio = window.devicePixelRatio || 1;
+    if (overlay.width !== Math.round(width * ratio) || overlay.height !== Math.round(height * ratio)) {
+      overlay.width = Math.round(width * ratio);
+      overlay.height = Math.round(height * ratio);
+    }
+    const ctx = overlay.getContext("2d")!;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    // The 2D helpers draw a little above the point they are given; these offsets undo that.
+    for (const effect of this.effects) {
+      const age = (now - effect.born) / EFFECT_MS[effect.kind];
+      if (effect.kind === "shot") {
+        const from = scene.project(effect.from, SHOT_HEIGHT);
+        const to = scene.project(effect.to, SHOT_HEIGHT);
+        drawShot(ctx, { x: from.x, y: from.y + 18 }, { x: to.x, y: to.y + 18 }, age);
+      } else if (effect.kind === "bump") {
+        const at = scene.project(effect.at, BUMP_HEIGHT);
+        drawBump(ctx, { x: at.x, y: at.y + 52 }, age);
+      }
+    }
+    for (const tag of this.tags(view, figures, self)) {
+      const at = scene.project(tag.figure, TAG_HEIGHT);
+      drawNameTag(ctx, { ...tag.figure, x: at.x, y: at.y + 52 }, tag.label, tag.color);
+    }
+  }
+
+  private clear2d(): void {
+    const ctx = this.canvas.getContext("2d")!;
+    ctx.fillStyle = "#0f080a";
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  private render2d(view: CrowdView, figures: Map<number, Figure>, self: Figure | undefined, now: number): void {
+    this.clear2d();
+    if (!this.floor) return;
+    const ctx = this.canvas.getContext("2d")!;
+    this.viewport = fitArena(this.canvas.width, this.canvas.height, view.arena, this.hudSpace() * (window.devicePixelRatio || 1));
+    ctx.save();
+    ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
+    ctx.scale(this.viewport.scale, this.viewport.scale);
+    ctx.drawImage(this.floor, 0, 0);
+
+    const mine = this.mineShown(view);
+    for (const prop of view.props) drawProp(ctx, prop, mine.includes(prop.id), this.flareOf(prop.id, now), now);
     if (view.hud.hint && !view.result && !this.shared) drawHint(ctx, view.hud.hint, view.arena, now);
 
     const ordered = [...figures.values()].sort((a, b) => a.y - b.y);
@@ -669,7 +852,6 @@ export class CrowdGame {
 
     if (view.zone) drawDarkness(ctx, view.zone, view.arena);
 
-    this.effects = this.effects.filter((effect) => now - effect.born < EFFECT_MS[effect.kind]);
     for (const effect of this.effects) {
       const age = (now - effect.born) / EFFECT_MS[effect.kind];
       if (effect.kind === "shot") drawShot(ctx, effect.from, effect.to, age);
@@ -678,6 +860,14 @@ export class CrowdGame {
       else drawPuff(ctx, effect.at, age);
     }
 
+    for (const tag of this.tags(view, figures, self)) drawNameTag(ctx, tag.figure, tag.label, tag.color);
+    if (!view.result) for (const crosshair of this.crosshairs()) drawCrosshair(ctx, crosshair.at, crosshair.ready);
+    ctx.restore();
+  }
+
+  // Names over heads: everyone's at the reveal, otherwise only your own and what you've earned the right to see.
+  private tags(view: CrowdView, figures: Map<number, Figure>, self: Figure | undefined): Tag[] {
+    const tags: Tag[] = [];
     if (view.result) {
       for (const entry of view.result.reveal) {
         const figure = figures.get(entry.entity);
@@ -685,37 +875,25 @@ export class CrowdGame {
         const won = entry.playerId === view.result.winnerPlayerId || entry.role === view.result.winnerRole;
         const color = entry.role === "killer" ? "#e9806b" : won ? "#e0a64a" : "#ece6d6";
         const suffix = entry.role === "killer" ? " (Killer)" : entry.role === "ringer" ? " (Ringer)" : "";
-        const label = `${this.nameOf(entry.playerId)}${suffix}`;
-        drawNameTag(ctx, figure, label, color);
+        tags.push({ figure, label: `${this.nameOf(entry.playerId)}${suffix}`, color });
       }
-    } else {
-      if (self) drawNameTag(ctx, self, view.ghost ? "Your ghost" : "You", "#e0a64a");
-      if (!this.shared) this.drawPartyTags(ctx, view, figures);
-      this.drawCrosshairs(ctx);
+      return tags;
     }
-    ctx.restore();
-  }
-
-  // A bought glimpse, or the host's overhead view of where the players are. Never on a shared screen.
-  private drawPartyTags(ctx: CanvasRenderingContext2D, view: CrowdView, figures: Map<number, Figure>): void {
-    const party = view.party;
-    if (!party) return;
-    const glimpse = party.glimpse !== undefined ? figures.get(party.glimpse) : undefined;
-    if (glimpse) drawNameTag(ctx, glimpse, "A player", "#6ba3e9");
-    for (const id of party.players ?? []) {
-      const figure = figures.get(id);
-      if (figure) drawNameTag(ctx, figure, "Player", "#e8d26a");
-    }
+    if (self) tags.push({ figure: self, label: view.ghost ? "Your ghost" : "You", color: "#e0a64a" });
+    if (!this.shared) tags.push(...partyTags(view, figures));
+    return tags;
   }
 
   // Lookouts and the host aim from above, so their crosshairs are the only thing of theirs on screen.
-  private drawCrosshairs(ctx: CanvasRenderingContext2D): void {
+  private crosshairs(): Array<{ at: CrowdVector; ready: boolean }> {
+    const crosshairs: Array<{ at: CrowdVector; ready: boolean }> = [];
     for (const state of this.seats) {
       const view = state.view;
       if (!view || !aimsFromAbove(view)) continue;
       const at = state.seat.source.kind === "keyboard" ? this.pointer : state.cursor;
-      if (at) drawCrosshair(ctx, at, canShoot(view));
+      if (at) crosshairs.push({ at, ready: canShoot(view) });
     }
+    return crosshairs;
   }
 
   private interpolated(now: number): Map<number, Figure> {
@@ -746,6 +924,20 @@ export class CrowdGame {
     }
     return result;
   }
+}
+
+// A bought glimpse, or the host's overhead view of where the players are. Never on a shared screen.
+function partyTags(view: CrowdView, figures: Map<number, Figure>): Tag[] {
+  const party = view.party;
+  if (!party) return [];
+  const tags: Tag[] = [];
+  const glimpse = party.glimpse !== undefined ? figures.get(party.glimpse) : undefined;
+  if (glimpse) tags.push({ figure: glimpse, label: "A player", color: "#6ba3e9" });
+  for (const id of party.players ?? []) {
+    const figure = figures.get(id);
+    if (figure) tags.push({ figure, label: "Player", color: "#e8d26a" });
+  }
+  return tags;
 }
 
 // What a shared screen can say: the goal and anything everyone can already see. Roles and secrets are felt through rumble.
@@ -808,6 +1000,24 @@ function unpack(packed: number[]): Map<number, Figure> {
     figures.set(id, { id, x: packed[index + 1], y: packed[index + 2], facing: packed[index + 3], state: packed[index + 4] as CrowdEntityState });
   }
   return figures;
+}
+
+// The item with the lowest score, skipping any scored undefined.
+function closest<T>(items: T[], score: (item: T) => number | undefined): T | undefined {
+  let best: { item: T; score: number } | undefined;
+  for (const item of items) {
+    const value = score(item);
+    if (value !== undefined && (!best || value < best.score)) best = { item, score: value };
+  }
+  return best?.item;
+}
+
+function distanceToSegment(point: CrowdVector, start: CrowdVector, end: CrowdVector): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  const t = lengthSquared > 0 ? Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared)) : 0;
+  return Math.hypot(point.x - (start.x + dx * t), point.y - (start.y + dy * t));
 }
 
 function lerp(from: number, to: number, t: number): number {

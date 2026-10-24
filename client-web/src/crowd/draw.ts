@@ -524,10 +524,10 @@ export function drawCrosshair(ctx: CanvasRenderingContext2D, at: CrowdVector, re
 
 export function drawNameTag(ctx: CanvasRenderingContext2D, figure: Figure, text: string, color: string): void {
   ctx.save();
-  ctx.font = "bold 13px system-ui, sans-serif";
+  ctx.font = "700 13px Cinzel, Georgia, serif";
   ctx.textAlign = "center";
-  const width = ctx.measureText(text).width + 12;
-  ctx.fillStyle = "rgb(20 24 22 / 82%)";
+  const width = ctx.measureText(text).width + 14;
+  ctx.fillStyle = "rgb(18 8 11 / 85%)";
   roundRect(ctx, figure.x - width / 2, figure.y - 66, width, 19, 6);
   ctx.fillStyle = color;
   ctx.fillText(text, figure.x, figure.y - 52);

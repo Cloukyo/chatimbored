@@ -26,8 +26,10 @@ export type CrowdInput = {
   // Any non-zero direction moves at full walk/run speed, so analog sticks can't give a player away.
   move: CrowdVector;
   run: boolean;
-  // World point to shoot towards, if the player fired this input.
+  // World point to shoot at, if the player fired this input.
   shoot?: CrowdVector;
+  // The entity the player pointed at when firing. They are the one shot, whoever stands in between.
+  shootAt?: number;
   // Mode action, e.g. the Killer's strike in Silent Witness.
   act: boolean;
 };

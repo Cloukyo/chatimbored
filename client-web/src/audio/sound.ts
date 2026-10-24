@@ -1,3 +1,5 @@
+import { Band, type MusicScene, midi } from "./music.js";
+
 // Every sound in the game is synthesised with Web Audio, so there are no files to load.
 // Browsers only allow audio after the first click or key press, so nothing plays until then.
 
@@ -20,19 +22,6 @@ export type Cue =
 type Volumes = { music: number; effects: number };
 
 const VOLUME_KEY = "morbid-masquerade:volume";
-// The waltz: A minor, three beats to the bar.
-const WALTZ_BPM = 138;
-const CHORDS = [
-  [57, 60, 64], // Am
-  [53, 57, 60], // F
-  [55, 59, 62], // G
-  [52, 56, 59], // E
-  [57, 60, 64],
-  [50, 53, 57], // Dm
-  [52, 56, 59],
-  [57, 60, 64],
-];
-const MELODY_SCALE = [69, 71, 72, 74, 76, 77, 79, 80, 81];
 
 class Sound {
   private context?: AudioContext;
@@ -41,12 +30,8 @@ class Sound {
   private crowd?: { gain: GainNode; source: AudioBufferSourceNode };
   private noise?: AudioBuffer;
   private volumes: Volumes = readVolumes();
-  private musicTimer?: number;
-  private nextBeatTime = 0;
-  private beat = 0;
-  private melodyNote = 4;
-  private tense = false;
-  private playingMusic = false;
+  private band?: Band;
+  private scene: MusicScene = "lobby";
 
   constructor() {
     const unlock = () => this.start();
@@ -85,7 +70,9 @@ class Sound {
     this.effects.gain.value = this.volumes.effects;
     this.effects.connect(context.destination);
     this.noise = makeNoise(context);
-    this.startMusic();
+    this.band = new Band(context, this.music, this.noise);
+    this.band.setScene(this.scene);
+    this.band.start();
   }
 
   play(cue: Cue, pan = 0): void {
@@ -170,40 +157,15 @@ class Sound {
     }
   }
 
-  // The last stretch of a round: the waltz speeds up and climbs.
+  // The last stretch of a round: the band speeds up and the drums come in.
   setTense(tense: boolean): void {
-    this.tense = tense;
+    this.band?.setTense(tense);
   }
 
-  private startMusic(): void {
-    if (this.playingMusic || !this.context) return;
-    this.playingMusic = true;
-    this.nextBeatTime = this.context.currentTime + 0.1;
-    this.musicTimer = window.setInterval(() => this.scheduleMusic(), 50);
-  }
-
-  // Schedules beats a little ahead of time so timer jitter doesn't show.
-  private scheduleMusic(): void {
-    const context = this.context!;
-    const out = this.music!;
-    while (this.nextBeatTime < context.currentTime + 0.25) {
-      const time = this.nextBeatTime;
-      const beatInBar = this.beat % 3;
-      const chord = CHORDS[Math.floor(this.beat / 3) % CHORDS.length];
-      const lift = this.tense ? 12 : 0;
-      if (beatInBar === 0) {
-        this.tone(out, time, midi(chord[0] - 24 + lift), 0.5, 0.45, "triangle");
-      } else {
-        for (const note of chord) this.tone(out, time, midi(note - 12 + lift), 0.18, 0.12, "sine");
-      }
-      // A wandering melody on most downbeats, staying near the chord.
-      if (beatInBar !== 2 && Math.random() < 0.7) {
-        this.melodyNote = Math.max(0, Math.min(MELODY_SCALE.length - 1, this.melodyNote + Math.round((Math.random() - 0.5) * 3)));
-        this.tone(out, time, midi(MELODY_SCALE[this.melodyNote] - 12 + lift), beatInBar === 0 ? 0.5 : 0.3, 0.12, "sine");
-      }
-      this.beat += 1;
-      this.nextBeatTime += 60 / (this.tense ? WALTZ_BPM * 1.3 : WALTZ_BPM);
-    }
+  // The lobby gets a music box; a round gets the full band.
+  setScene(scene: MusicScene): void {
+    this.scene = scene;
+    this.band?.setScene(scene);
   }
 
   private tone(out: AudioNode, at: number, frequency: number, length: number, volume: number, wave: OscillatorType, slideTo?: number): void {
@@ -236,10 +198,6 @@ class Sound {
     source.start(at, Math.random());
     source.stop(at + length + 0.05);
   }
-}
-
-function midi(note: number): number {
-  return 440 * 2 ** ((note - 69) / 12);
 }
 
 function makeNoise(context: AudioContext): AudioBuffer {

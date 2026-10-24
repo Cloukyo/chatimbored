@@ -6,7 +6,7 @@
 
 ## Folder Structure
 
-- `client-web/`: Browser client (TypeScript, Vite, Canvas 2D) for the crowd games: Act Natural, Silent Witness, Lantern Festival, Bell Ringers, Heist Hour, Marked, Freeze Frame, Hot Parcel and Closing Time. Mode rules live in `server/src/crowd/modes.ts`.
+- `client-web/`: Browser client (TypeScript, Vite, Three.js) for the crowd games: Act Natural, Silent Witness, Lantern Festival, Bell Ringers, Heist Hour, Marked, Freeze Frame, Hot Parcel and Closing Time. Mode rules live in `server/src/crowd/modes.ts`. The rooms are drawn in 3D by `client-web/src/crowd/scene3d.ts` (a burgundy, black and gold ballroom seen at a slight 3/4 angle; figures wear animal masks that always face the camera; looks come from the shuffled entity id, so the picture never marks a player). Floor markings (hints, darkness, smoke, crosshairs) are painted with the 2D helpers in `draw.ts` onto a layer lying on the floor, and name tags, shots and "!"s go on a 2D overlay canvas. Without WebGL, `CrowdGame` falls back to the old flat 2D drawing in `draw.ts`.
 - `client-godot/`: Godot 4 client project for the other minigames. Godot should open this folder only.
 - `server/`: Node.js and TypeScript WebSocket server.
 - `shared/`: Shared message/type definitions and constants. `shared/crowd/` holds the crowd protocol and the movement rules that the server and client prediction both run.

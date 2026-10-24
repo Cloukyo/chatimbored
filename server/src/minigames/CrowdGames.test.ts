@@ -164,7 +164,7 @@ test("Act Natural: one shot each, and a shot player is out", () => {
   target.x = 600;
   target.y = 400;
 
-  send(crowdActNatural, room, "p1", { shoot: { x: 700, y: 400 } });
+  send(crowdActNatural, room, "p1", { shoot: { x: 600, y: 400 } });
   assert.equal(target.dead, true);
   assert.equal(view(crowdActNatural, room, "p1").shots, 0);
   assert.ok(view(crowdActNatural, room, "p3").events.some((event) => event.type === "shot"));
@@ -174,6 +174,31 @@ test("Act Natural: one shot each, and a shot player is out", () => {
   third.y = 400;
   send(crowdActNatural, room, "p1", { shoot: { x: 700, y: 400 } });
   assert.equal(third.dead, false);
+});
+
+test("a shot hits whoever was pointed at, even past someone in the way, and misses empty floor", () => {
+  const { room, match } = start(crowdActNatural);
+  match.entities.filter((entity) => entity.brain).forEach((npc) => {
+    npc.x = 30;
+    npc.y = 30;
+    npc.brain!.timerMs = 1e9;
+  });
+  const shooter = entityOf(match, "p1");
+  const between = entityOf(match, "p2");
+  const target = entityOf(match, "p3");
+  Object.assign(shooter, { x: 400, y: 400 });
+  Object.assign(between, { x: 500, y: 400 });
+  Object.assign(target, { x: 600, y: 400 });
+  match.slots.get("p1")!.shots = 2;
+
+  send(crowdActNatural, room, "p1", { shoot: { x: 800, y: 400 } });
+  assert.equal(between.dead, false);
+  assert.equal(target.dead, false);
+
+  // The client names who was clicked, from where it last saw them a moment ago.
+  send(crowdActNatural, room, "p1", { shoot: { x: 590, y: 380 }, shootAt: target.id });
+  assert.equal(between.dead, false);
+  assert.equal(target.dead, true);
 });
 
 test("Silent Witness: the Killer changes between rounds", () => {
@@ -297,7 +322,7 @@ test("Bell Ringers: Lookouts aren't in the crowd and shoot where they click", ()
   clearCrowd(match);
   ringer.entity.x = 600;
   ringer.entity.y = 400;
-  send(crowdBellRingers, room, lookout.playerId, { shoot: { x: 603, y: 382 } });
+  send(crowdBellRingers, room, lookout.playerId, { shoot: { x: 603, y: 409 } });
   assert.equal(ringer.entity.dead, true);
   assert.equal(room.game!.winnerId, "lookouts");
   crowdBellRingers.finish(room);

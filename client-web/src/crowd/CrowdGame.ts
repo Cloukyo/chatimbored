@@ -25,6 +25,7 @@ import {
   toWorld,
 } from "./draw.js";
 import { HOST_TRICKS } from "../../../shared/party/night.js";
+import { sound } from "../audio/sound.js";
 import { CUES, PAD, PadEdges, padAim, padMove, pressed, readPad, rumble } from "../input/pads.js";
 
 // Others are drawn this far in the past so there are always two snapshots to blend between.
@@ -116,7 +117,16 @@ type SeatState = {
 const CONTROLS = {
   keyboard: { shoot: "Click", act: "E", run: "Shift" },
   pad: { shoot: "X", act: "A", run: "RB" },
+  touch: { shoot: "Tap", act: "Act", run: "Run" },
 };
+
+// Phones and tablets: a stick and two buttons on screen, and a tap on the crowd shoots.
+const TOUCH = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+const STICK_RADIUS = 52;
+
+function controlsFor(source: InputSource): (typeof CONTROLS)["keyboard"] {
+  return source.kind === "pad" ? CONTROLS.pad : TOUCH ? CONTROLS.touch : CONTROLS.keyboard;
+}
 
 export class CrowdGame {
   private endsAt = 0;
@@ -126,6 +136,12 @@ export class CrowdGame {
   private floor?: HTMLCanvasElement;
   private floorMode?: CrowdView["mode"];
   private hudHeight = 0;
+  private resultPlayed = false;
+  private touchMove: CrowdVector = { x: 0, y: 0 };
+  private touchRun = false;
+  private touchControls?: HTMLElement;
+  private lastSecond = -1;
+  private lastStep = 0;
   private viewport: View2D = { scale: 1, offsetX: 0, offsetY: 0 };
   private readonly keys = new Set<string>();
   private readonly seats: SeatState[];
@@ -173,9 +189,67 @@ export class CrowdGame {
       this.frame = requestAnimationFrame(loop);
     };
     this.frame = requestAnimationFrame(loop);
+    sound.play("start");
+    sound.setCrowd(true);
+    if (TOUCH && !shared) this.addTouchControls(signal);
+  }
+
+  // A thumb stick on the left, Act and Run on the right. Taps elsewhere on the arena shoot, like a click.
+  private addTouchControls(signal: AbortSignal): void {
+    const box = document.createElement("div");
+    box.className = "touch-controls";
+    box.innerHTML = `<div class="stick"><div class="knob"></div></div><div class="touch-buttons"><button class="touch-run">Run</button><button class="touch-act">Act</button></div>`;
+    this.canvas.parentElement!.append(box);
+    this.touchControls = box;
+    const stick = box.querySelector<HTMLElement>(".stick")!;
+    const knob = box.querySelector<HTMLElement>(".knob")!;
+    let stickPointer: number | undefined;
+    const moveStick = (event: PointerEvent) => {
+      const rect = stick.getBoundingClientRect();
+      let x = event.clientX - (rect.left + rect.width / 2);
+      let y = event.clientY - (rect.top + rect.height / 2);
+      const length = Math.hypot(x, y);
+      if (length > STICK_RADIUS) {
+        x = (x / length) * STICK_RADIUS;
+        y = (y / length) * STICK_RADIUS;
+      }
+      knob.style.transform = `translate(${x}px, ${y}px)`;
+      // A small dead zone so a resting thumb doesn't drift.
+      this.touchMove = length < 12 ? { x: 0, y: 0 } : { x: x / STICK_RADIUS, y: y / STICK_RADIUS };
+    };
+    const release = (event: PointerEvent) => {
+      if (event.pointerId !== stickPointer) return;
+      stickPointer = undefined;
+      knob.style.transform = "";
+      this.touchMove = { x: 0, y: 0 };
+    };
+    stick.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      stickPointer = event.pointerId;
+      stick.setPointerCapture(event.pointerId);
+      moveStick(event);
+    }, { signal });
+    stick.addEventListener("pointermove", (event) => event.pointerId === stickPointer && moveStick(event), { signal });
+    stick.addEventListener("pointerup", release, { signal });
+    stick.addEventListener("pointercancel", release, { signal });
+    const act = box.querySelector<HTMLElement>(".touch-act")!;
+    act.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      const keyboard = this.keyboardSeat();
+      if (keyboard) keyboard.pendingAct = true;
+    }, { signal });
+    const run = box.querySelector<HTMLElement>(".touch-run")!;
+    run.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      this.touchRun = true;
+    }, { signal });
+    for (const type of ["pointerup", "pointercancel", "pointerleave"]) run.addEventListener(type, () => (this.touchRun = false), { signal });
   }
 
   destroy(): void {
+    this.touchControls?.remove();
+    sound.setCrowd(false);
+    sound.setTense(false);
     this.abort.abort();
     window.clearInterval(this.inputTimer);
     if (this.frame !== undefined) cancelAnimationFrame(this.frame);
@@ -206,6 +280,12 @@ export class CrowdGame {
     while (this.snapshots.length > 12) this.snapshots.shift();
 
     this.collectEvents(view, figures, now);
+    if (view.result && !this.resultPlayed) {
+      this.resultPlayed = true;
+      sound.setCrowd(false);
+      sound.setTense(false);
+      this.playResult(view);
+    }
     if (!this.shared) this.reconcile(view, figures, now);
     this.updateHud();
   }
@@ -289,11 +369,13 @@ export class CrowdGame {
         x: (this.held(KEYS.right) ? 1 : 0) - (this.held(KEYS.left) ? 1 : 0),
         y: (this.held(KEYS.down) ? 1 : 0) - (this.held(KEYS.up) ? 1 : 0),
       };
-      run = this.held(KEYS.run);
+      run = this.held(KEYS.run) || this.touchRun;
+      if (move.x === 0 && move.y === 0) move = this.touchMove;
     }
     run = run && view.canRun && !view.ghost;
 
-    state.seq += 1;
+    // After a reconnect the server has already seen higher numbers than this fresh page.
+    state.seq = Math.max(state.seq, view.ack) + 1;
     const input: CrowdInput = { kind: "crowd", seq: state.seq, move, run, act: state.pendingAct };
     if (state.pendingShot && canShoot(view)) input.shoot = roundPoint(state.pendingShot);
     state.pendingShot = undefined;
@@ -382,18 +464,48 @@ export class CrowdGame {
   }
 
   private collectEvents(view: CrowdView, figures: Map<number, Figure>, now: number): void {
+    // Sounds sit left or right with where they happened.
+    const pan = (at: CrowdVector) => ((at.x / view.arena.width) * 2 - 1) * 0.7;
+    // The first view also carries the last few seconds of events; show those but don't replay their sounds.
+    const quiet = this.seenEvents.size === 0 && this.snapshots.length <= 1;
     for (const event of view.events) {
       if (this.seenEvents.has(event.id)) continue;
       this.seenEvents.add(event.id);
-      if (event.type === "shot") this.effects.push({ born: now, kind: "shot", from: event.from, to: event.to });
+      if (event.type === "shot") {
+        this.effects.push({ born: now, kind: "shot", from: event.from, to: event.to });
+        if (!quiet) sound.play("shot", pan(event.from));
+      }
       if (event.type === "down") {
         const figure = figures.get(event.entity);
         if (figure) this.effects.push({ born: now, kind: "puff", at: { x: figure.x, y: figure.y } });
+        if (!quiet) sound.play("down", figure ? pan(figure) : 0);
       }
-      if (event.type === "strike") this.effects.push({ born: now, kind: "strike", at: event.at });
-      if (event.type === "bump") this.effects.push({ born: now, kind: "bump", at: event.at });
-      if (event.type === "flare") this.flares.set(event.prop, now);
+      if (event.type === "strike") {
+        this.effects.push({ born: now, kind: "strike", at: event.at });
+        if (!quiet) sound.play("strike", pan(event.at));
+      }
+      if (event.type === "bump") {
+        this.effects.push({ born: now, kind: "bump", at: event.at });
+        if (!quiet) sound.play("bump", pan(event.at));
+      }
+      if (event.type === "flare") {
+        this.flares.set(event.prop, now);
+        const prop = view.props.find((candidate) => candidate.id === event.prop);
+        if (prop && !quiet) sound.play(prop.kind === "bell" ? "bell" : prop.kind === "vault" ? "vault" : "chime", pan(prop));
+      }
     }
+  }
+
+  // A sting when the round ends: a win or a loss for a screen with one player, a plain reveal on a shared one.
+  private playResult(view: CrowdView): void {
+    const result = view.result!;
+    const mine = this.shared ? undefined : result.reveal.find((entry) => entry.entity === view.you);
+    if (!mine) {
+      sound.play("reveal");
+      return;
+    }
+    const won = mine.playerId === result.winnerPlayerId || (result.winnerRole !== undefined && mine.role === result.winnerRole);
+    sound.play(won ? "win" : "lose");
   }
 
   private updateHud(): void {
@@ -412,7 +524,7 @@ export class CrowdGame {
   private partyLines(view: CrowdView): string[] {
     const party = view.party;
     if (!party) return [];
-    const keys = CONTROLS[this.seats[0].seat.source.kind];
+    const keys = controlsFor(this.seats[0].seat.source);
     const lines: string[] = [];
     if (view.role === "host") lines.push(...hostLines(party, keys));
     if (party.contract) lines.push(`Contract: ${escapeHtml(party.contract)}${party.contractDone ? " ✓" : ""}`);
@@ -428,18 +540,18 @@ export class CrowdGame {
     const wanted = this.seats.find((state) => state.view?.party?.wanted)?.view?.party?.wanted;
     if (wanted) lines.push(`Wanted: the leader is ${escapeHtml(wanted)}`);
     const host = this.seats.find((state) => state.view?.role === "host");
-    if (host?.view?.party) lines.push(...hostLines(host.view.party, CONTROLS[host.seat.source.kind]));
+    if (host?.view?.party) lines.push(...hostLines(host.view.party, controlsFor(host.seat.source)));
     return lines;
   }
 
   private hudLines(view: CrowdView): string[] {
-    const keys = CONTROLS[this.seats[0].seat.source.kind];
+    const keys = controlsFor(this.seats[0].seat.source);
     if (view.role === "host") return [];
     const progress = `${view.hud.progress ?? 0}/${view.hud.goal ?? 0}`;
     const shot = (aim: string) => (view.shots > 0 ? `${keys.shoot} to shoot ${aim} (${view.shots} left)` : "Out of shots");
     switch (view.mode) {
       case "act_natural":
-        return ["Reach the exit first", shot("a rival"), `${keys.run} runs, but people notice`];
+        return ["Reach the exit first", shot("a rival"), `Running (${keys.run}) gets noticed`];
       case "silent_witness":
         return view.role === "killer"
           ? ["You are the <b>Killer</b>", view.canAct ? `${keys.act} to strike someone close` : "Strike recharging", `Bodies ${view.hud.kills ?? 0}/${view.hud.killTarget ?? 5}`]
@@ -512,6 +624,11 @@ export class CrowdGame {
       const seconds = this.secondsLeft();
       timer.textContent = `${seconds}s`;
       timer.classList.toggle("urgent", seconds <= 10 && !view?.result);
+      if (seconds !== this.lastSecond && view && !view.result) {
+        this.lastSecond = seconds;
+        if (seconds <= 10 && seconds > 0) sound.play("tick");
+        sound.setTense(seconds <= 15);
+      }
     }
     if (!view || !this.floor) return;
 
@@ -523,6 +640,11 @@ export class CrowdGame {
 
     const figures = this.interpolated(now);
     const self = this.shared ? undefined : figures.get(view.you);
+    // Your own footsteps, only on a screen with one player.
+    if (self && this.predicted?.moving && !view.result && now - this.lastStep > (this.predicted.running ? 210 : 340)) {
+      this.lastStep = now;
+      sound.play("step", ((self.x / view.arena.width) * 2 - 1) * 0.5);
+    }
     if (self && this.predicted && !view.result) {
       const shown = this.displayedSelf(now);
       self.x = shown.x;
@@ -653,7 +775,7 @@ function sharedHudLines(view: CrowdView): string[] {
   }
 }
 
-function hostLines(party: NonNullable<CrowdView["party"]>, keys: (typeof CONTROLS)["keyboard"]): string[] {
+function hostLines(party: NonNullable<CrowdView["party"]>, keys: ReturnType<typeof controlsFor>): string[] {
   const trick = TRICK_NAMES[party.trick ?? ""] ?? "Toast";
   return [
     "<b>Party Host</b>",

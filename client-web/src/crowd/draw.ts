@@ -12,10 +12,9 @@ export type Figure = {
 
 export type View2D = { scale: number; offsetX: number; offsetY: number };
 
-const COAT = "#56627a";
-const COAT_SHADE = "#46506a";
 const SKIN = "#e3bd96";
 const HAT = "#2c2f3a";
+const HAIR = "#3a2a22";
 const LEGS = "#30333d";
 const SICK_SKIN = "#a9c48a";
 const DEAD = "#7d7f86";
@@ -175,8 +174,23 @@ export function paintFloor(arena: Arena, style: FloorStyle = "plaza"): HTMLCanva
   return floor;
 }
 
+// Masquerade costumes. Each figure's outfit comes from its entity id, which the server shuffles every round,
+// so players and guests draw from the same wardrobe and an outfit says nothing about who is inside it.
+const COATS = ["#56627a", "#6b4a6e", "#3f5f58", "#7a4848", "#55566a", "#7a6a48", "#4a5a7a", "#694a3e"];
+const MASKS = ["#e0b85a", "#ece6d6", "#2a2a30", "#b0413e", "#b8c0c8", "#4f8a7a"];
+type Outfit = { coat: string; shade: string; mask: string; body: "suit" | "gown" | "cloak"; head: "tophat" | "plume" | "bun" | "tricorn" };
+
+function outfitFor(id: number): Outfit {
+  const pick = <T,>(items: readonly T[], salt: number) => items[Math.floor(hash(id * 31 + salt) * items.length)];
+  const coat = pick(COATS, 1);
+  const body = pick(["suit", "suit", "gown", "cloak"] as const, 2);
+  const head = pick(body === "gown" ? (["plume", "bun", "plume"] as const) : (["tophat", "tophat", "tricorn", "plume"] as const), 3);
+  return { coat, shade: shadeOf(coat, -18), mask: pick(MASKS, 4), body, head };
+}
+
 export function drawFigure(ctx: CanvasRenderingContext2D, figure: Figure, time: number, highlight: boolean): void {
   const { x, y, state } = figure;
+  const outfit = outfitFor(figure.id);
   ctx.save();
   ctx.translate(x, y);
 
@@ -194,7 +208,7 @@ export function drawFigure(ctx: CanvasRenderingContext2D, figure: Figure, time: 
   }
 
   if (state === CROWD_STATE.DEAD) {
-    drawFallen(ctx, figure.facing);
+    drawFallen(ctx, figure.facing, outfit);
     ctx.restore();
     return;
   }
@@ -210,41 +224,140 @@ export function drawFigure(ctx: CanvasRenderingContext2D, figure: Figure, time: 
   const lean = state === CROWD_STATE.RUN ? Math.cos((figure.facing * Math.PI) / 4) * 0.18 : 0;
   ctx.rotate(wobble + lean);
 
-  ctx.fillStyle = LEGS;
-  ctx.fillRect(-5 + swing * 0.3, -11, 4, 11 - Math.max(0, swing) * 0.4);
-  ctx.fillRect(1 - swing * 0.3, -11, 4, 11 - Math.max(0, -swing) * 0.4);
-
-  ctx.translate(0, -bob);
-  ctx.fillStyle = COAT;
-  roundRect(ctx, -8, -26, 16, 16, 5);
-  ctx.fillStyle = COAT_SHADE;
-  ctx.fillRect(-8, -14, 16, 3);
-
   const dx = Math.cos((figure.facing * Math.PI) / 4);
   const dy = Math.sin((figure.facing * Math.PI) / 4);
-  ctx.fillStyle = sick ? SICK_SKIN : SKIN;
-  ctx.beginPath();
-  ctx.arc(dx * 1.2, -32, 7, 0, Math.PI * 2);
-  ctx.fill();
 
-  if (dy < 0.6) {
-    // Facing away shows only the back of the head.
-    ctx.fillStyle = "#1f2128";
-    if (dy > -0.6) {
-      ctx.fillRect(dx * 3.6 - 1, -34, 2, 2.4);
-      if (Math.abs(dx) < 0.9) ctx.fillRect(dx * 3.6 - 5 + (dx > 0 ? 3 : 1), -34, 2, 2.4);
+  if (outfit.body === "gown") {
+    // A full skirt that sways instead of legs.
+    ctx.fillStyle = outfit.shade;
+    ctx.beginPath();
+    ctx.moveTo(-6, -20);
+    ctx.lineTo(6, -20);
+    ctx.lineTo(11 + swing * 0.3, -1);
+    ctx.quadraticCurveTo(0, 2, -11 + swing * 0.3, -1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.translate(0, -bob);
+    ctx.fillStyle = outfit.coat;
+    roundRect(ctx, -6.5, -27, 13, 10, 4);
+  } else {
+    ctx.fillStyle = LEGS;
+    ctx.fillRect(-5 + swing * 0.3, -11, 4, 11 - Math.max(0, swing) * 0.4);
+    ctx.fillRect(1 - swing * 0.3, -11, 4, 11 - Math.max(0, -swing) * 0.4);
+    ctx.translate(0, -bob);
+    ctx.fillStyle = outfit.coat;
+    if (outfit.body === "cloak") {
+      ctx.beginPath();
+      ctx.moveTo(-7, -27);
+      ctx.lineTo(7, -27);
+      ctx.lineTo(10, -6);
+      ctx.lineTo(-10, -6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = outfit.shade;
+      ctx.fillRect(-10, -9, 20, 3);
+    } else {
+      roundRect(ctx, -8, -26, 16, 16, 5);
+      ctx.fillStyle = outfit.shade;
+      ctx.fillRect(-8, -14, 16, 3);
+      // Shirt front, when facing this way.
+      if (dy > -0.3) {
+        ctx.fillStyle = "#d8d2c4";
+        ctx.beginPath();
+        ctx.moveTo(dx * 2 - 2.5, -26);
+        ctx.lineTo(dx * 2 + 2.5, -26);
+        ctx.lineTo(dx * 2, -19);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
   }
 
-  ctx.fillStyle = HAT;
+  const headX = dx * 1.2;
+  ctx.fillStyle = sick ? SICK_SKIN : SKIN;
   ctx.beginPath();
-  ctx.ellipse(dx * 1.2, -37, 9, 3, 0, 0, Math.PI * 2);
+  ctx.arc(headX, -32, 7, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillRect(dx * 1.2 - 5.5, -44, 11, 7);
+
+  if (outfit.head === "bun") {
+    ctx.fillStyle = HAIR;
+    ctx.beginPath();
+    ctx.arc(headX, -34, 7.2, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(headX - dx * 3, -40, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // The mask from the front or the side; facing away shows only its ribbon.
+  if (dy > -0.6) drawMask(ctx, headX + dx * 2.2, -32, dy >= 0.6 ? 0 : dx, outfit.mask);
+  else drawRibbon(ctx, headX, -33, outfit.mask);
+
+  if (outfit.head === "tophat") {
+    ctx.fillStyle = HAT;
+    ctx.beginPath();
+    ctx.ellipse(headX, -37, 9, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(headX - 5.5, -44, 11, 7);
+    ctx.fillStyle = outfit.mask;
+    ctx.fillRect(headX - 5.5, -39.5, 11, 1.6);
+  } else if (outfit.head === "tricorn") {
+    ctx.fillStyle = HAT;
+    ctx.beginPath();
+    ctx.moveTo(headX - 11, -36);
+    ctx.quadraticCurveTo(headX - 6, -40, headX - 4, -45);
+    ctx.quadraticCurveTo(headX, -42, headX + 4, -45);
+    ctx.quadraticCurveTo(headX + 6, -40, headX + 11, -36);
+    ctx.quadraticCurveTo(headX, -38.5, headX - 11, -36);
+    ctx.fill();
+    ctx.fillStyle = outfit.mask;
+    ctx.beginPath();
+    ctx.arc(headX + 4, -40, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (outfit.head === "plume") {
+    // A feather standing up from a band.
+    ctx.fillStyle = outfit.mask;
+    ctx.fillRect(headX - 6, -38.5, 12, 2);
+    ctx.fillStyle = outfit.coat;
+    ctx.beginPath();
+    ctx.ellipse(headX + 4, -45, 2.6, 7, 0.35 + Math.sin(time * 0.004 + figure.id) * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   if (state === CROWD_STATE.STUNNED) drawDizzy(ctx, time, figure.id);
 
   ctx.restore();
+}
+
+function drawMask(ctx: CanvasRenderingContext2D, x: number, y: number, dx: number, color: string): void {
+  const width = 6.5 - Math.abs(dx) * 1.5;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x - width, y - 1);
+  ctx.quadraticCurveTo(x - width - 1.5, y - 4, x - width + 1, y - 3.5);
+  ctx.lineTo(x, y - 2.5);
+  ctx.lineTo(x + width - 1, y - 3.5);
+  ctx.quadraticCurveTo(x + width + 1.5, y - 4, x + width, y - 1);
+  ctx.quadraticCurveTo(x, y + 3, x - width, y - 1);
+  ctx.fill();
+  ctx.fillStyle = "#1f2128";
+  ctx.fillRect(x - width * 0.55 - 1, y - 1.8, 2, 1.8);
+  if (Math.abs(dx) < 0.9) ctx.fillRect(x + width * 0.55 - 1, y - 1.8, 2, 1.8);
+}
+
+function drawRibbon(ctx: CanvasRenderingContext2D, x: number, y: number, color: string): void {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(x - 6.5, y - 1.5);
+  ctx.lineTo(x + 6.5, y - 1.5);
+  ctx.stroke();
+}
+
+function shadeOf(hex: string, amount: number): string {
+  const value = Number.parseInt(hex.slice(1), 16);
+  const channel = (shift: number) => Math.max(0, Math.min(255, ((value >> shift) & 255) + amount));
+  return `rgb(${channel(16)} ${channel(8)} ${channel(0)})`;
 }
 
 // Little orbiting stars over a stunned head.
@@ -447,11 +560,12 @@ export function drawPuff(ctx: CanvasRenderingContext2D, at: CrowdVector, age: nu
   ctx.restore();
 }
 
-function drawFallen(ctx: CanvasRenderingContext2D, facing: number): void {
+function drawFallen(ctx: CanvasRenderingContext2D, facing: number, outfit: Outfit): void {
   const side = Math.cos((facing * Math.PI) / 4) >= 0 ? 1 : -1;
   ctx.scale(side, 1);
-  ctx.fillStyle = DEAD;
+  ctx.fillStyle = outfit.shade;
   roundRect(ctx, -14, -9, 18, 10, 4);
+  ctx.fillStyle = DEAD;
   ctx.beginPath();
   ctx.arc(9, -5, 6.5, 0, Math.PI * 2);
   ctx.fill();

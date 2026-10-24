@@ -22,6 +22,11 @@ export function parseClientMessage(raw: unknown): ClientMessage {
       };
     case "LEAVE_ROOM":
       return { type: "LEAVE_ROOM" };
+    case "RESUME":
+      if (typeof message.token !== "string" || message.token.length > 64) throw new Error("token must be a string.");
+      return { type: "RESUME", token: message.token };
+    case "RENAME":
+      return { type: "RENAME", displayName: readDisplayName(message.displayName) };
     case "PLAYER_READY":
       if (typeof message.isReady !== "boolean") throw new Error("isReady must be a boolean.");
       return { type: "PLAYER_READY", isReady: message.isReady };

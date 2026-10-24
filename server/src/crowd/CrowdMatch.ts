@@ -51,6 +51,8 @@ export type CrowdSlot = {
   lastRun: boolean;
   ack: number;
   connected: boolean;
+  // Lost their connection for now: their figure wanders like the crowd until they're back.
+  away?: boolean;
   // Other players this player took down with a shot or a strike, for scoring across rounds.
   takedowns: string[];
   shotsFired: number;
@@ -207,7 +209,7 @@ export class CrowdMatch {
       }
       const entity = slot.entity;
       if (slot.ghost) {
-        this.moveGhost(slot);
+        if (!slot.away) this.moveGhost(slot);
         continue;
       }
       if (entity.dead || entity.brain) continue;
@@ -276,6 +278,23 @@ export class CrowdMatch {
     if (slot.ghost && !slot.ghost.dead) slot.ghost.brain = { timerMs: 0 };
     slot.ghost = undefined;
     this.rules.onPlayerLeft?.(this, slot);
+  }
+
+  setAway(playerId: string, away: boolean): void {
+    const slot = this.slots.get(playerId);
+    if (!slot || !slot.connected || Boolean(slot.away) === away) return;
+    slot.away = away;
+    slot.queue = [];
+    slot.lastDirection = { x: 0, y: 0 };
+    slot.lastRun = false;
+    for (const entity of [slot.entity, slot.ghost]) {
+      if (!entity || entity.dead || entity.hidden) continue;
+      entity.brain = away ? { timerMs: 0 } : undefined;
+      if (!away) {
+        entity.direction = { x: 0, y: 0 };
+        entity.running = false;
+      }
+    }
   }
 
   slotForEntity(entity: CrowdEntity): CrowdSlot | undefined {
@@ -347,7 +366,8 @@ export class CrowdMatch {
 
   // Hands a player who is out of the round a random NPC to steer.
   makeGhost(slot: CrowdSlot): void {
-    const taken = new Set([...this.slots.values()].map((other) => other.ghost));
+    // Not another ghost, and not a player who is away and only walking like the crowd for now.
+    const taken = new Set([...this.slots.values()].flatMap((other) => (other.away ? [other.ghost, other.entity] : [other.ghost])));
     const free = this.entities.filter((entity) => entity.brain && !entity.dead && !entity.hidden && !taken.has(entity));
     if (free.length === 0) return;
     const ghost = free[Math.floor(this.random() * free.length)];

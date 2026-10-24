@@ -212,7 +212,13 @@ Do not upload `client-godot/builds/web/` to the Node server host. It belongs on 
 
 ## Browser Client (crowd games)
 
-The crowd games run in `client-web/`. `npm run vercel-build` builds it into `client-godot/builds/web/play/`, so the existing Vercel site serves it at `/play/` next to the Godot build, and the site root redirects there. The Godot build is still at `/index.html`. No extra Vercel project is needed.
+The crowd games (Morbid Masquerade) run in `client-web/`. `npm run vercel-build` lays the whole site out in `dist/` (`scripts/assemble-site.mjs`):
+
+- `/` is the chatImbored hub page, from `hub/index.html`.
+- `/play/` is Morbid Masquerade, built from `client-web/`.
+- `/classic/index.html` is the Godot build, copied from `client-godot/builds/web/`. Link to `index.html` itself: the Godot page loads its files by relative path.
+
+No extra Vercel project is needed.
 
 It connects to `wss://chatimbored.onrender.com` by default. Override it with the `VITE_SERVER_URL` environment variable at build time, or `?server=wss://...` in the page URL. Invite links look like `https://your-site.vercel.app/play/?room=ABCDE`.
 
@@ -227,7 +233,7 @@ Use these Vercel settings:
 - Root Directory: repo root
 - Install Command: `npm install`
 - Build Command: `npm run vercel-build`
-- Output Directory: `client-godot/builds/web`
+- Output Directory: `dist`
 
 The committed `vercel.json` sets those project defaults and adds static headers for Godot `.wasm` and `.pck` files.
 

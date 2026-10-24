@@ -6,7 +6,7 @@ client-godot/imported/
 client-godot/export/
 client-godot/exports/
 client-godot/builds/web/*.import
-# Browser client copied in by `npm run vercel-build`
+# Old output path of `npm run vercel-build`; the site is now assembled in dist/
 client-godot/builds/web/play/
 client-godot/*.tmp
 client-godot/*.translation

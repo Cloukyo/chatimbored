@@ -16,6 +16,7 @@ import {
 import { CrowdGame, type GameSeat, type InputSource } from "./crowd/CrowdGame.js";
 import { PAD, PadEdges, connectedPads } from "./input/pads.js";
 import { roomIcon } from "./party/icons.js";
+import { sound } from "./audio/sound.js";
 import { Connection, resolveServerUrl, wakeServer } from "./net.js";
 
 const MODES = [
@@ -75,7 +76,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const screens = { landing: $("landing"), lobby: $("lobby"), board: $("board"), step: $("night-step"), nightOver: $("night-over"), game: $("game") };
 
 // An extra player on this screen, with their own controller and their own connection to the room.
-type CouchSeat = { key: string; pad: number; connection: Connection; playerId: string; readied: boolean };
+type CouchSeat = { key: string; pad: number; connection: Connection; playerId: string; readied: boolean; token: string; retries: number };
 
 let room: RoomSnapshot | undefined;
 let playerId = "";
@@ -90,6 +91,7 @@ const chosenLayers: NightOptions = defaultNightOptions(false);
 // Which button each of this screen's players has highlighted with a controller, between rounds.
 const stepFocus = new Map<string, number>();
 let stepPhase = "";
+let nightOverPlayed = false;
 const couchSeats: CouchSeat[] = [];
 const menuEdges = new PadEdges();
 
@@ -99,7 +101,15 @@ const connection = new Connection(
   serverUrl,
   onMessage,
   (reason) => {
-    showToast(`${reason} Refresh to reconnect.`);
+    // Hold on to the seat: the server keeps it for a while, so keep trying to take it back.
+    if (myToken && resumeAttempts < RESUME_ATTEMPTS) {
+      resumeAttempts += 1;
+      showToast("Connection lost. Reconnecting…", "info");
+      window.setTimeout(() => connection.send({ type: "RESUME", token: myToken }), RESUME_DELAY_MS);
+      return;
+    }
+    showToast(`${reason} Refresh to try again.`);
+    forgetSession();
     $("landing-status").textContent = "";
     room = undefined;
     removeAllCouchSeats();
@@ -108,6 +118,90 @@ const connection = new Connection(
   },
   () => ($("landing-status").textContent = "Waking up the game server. This can take up to a minute the first time."),
 );
+
+// How to play ---------------------------------------------------------------
+
+const help = $<HTMLDialogElement>("help");
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-help]")) button.addEventListener("click", () => help.showModal());
+$("help-close").addEventListener("click", () => help.close());
+help.addEventListener("click", (event) => event.target === help && help.close());
+
+// Sound -------------------------------------------------------------------
+
+const musicVolume = $<HTMLInputElement>("music-volume");
+const effectsVolume = $<HTMLInputElement>("effects-volume");
+musicVolume.value = String(sound.settings.music);
+effectsVolume.value = String(sound.settings.effects);
+for (const slider of [musicVolume, effectsVolume]) {
+  slider.addEventListener("input", () => sound.setVolumes({ music: Number(musicVolume.value), effects: Number(effectsVolume.value) }));
+}
+$("sound-toggle").addEventListener("click", () => {
+  const panel = $("sound-panel");
+  panel.hidden = !panel.hidden;
+  $("sound-toggle").setAttribute("aria-expanded", String(!panel.hidden));
+});
+// A soft click for every button press.
+document.addEventListener("click", (event) => {
+  if (event.target instanceof HTMLElement && event.target.closest("button")) sound.play("click");
+});
+
+// Reconnecting ----------------------------------------------------------
+// Each seat on this screen has a secret token from the server. A refresh or a dropped connection sends it back
+// to take the same seat again. Kept per tab, so two tabs stay two players.
+
+const SESSION_KEY = "morbid-masquerade:session";
+const RESUME_ATTEMPTS = 20;
+const RESUME_DELAY_MS = 1500;
+type StoredSession = { server: string; room: string; token: string; pad?: number; seats: Array<{ pad: number; token: string }> };
+let myToken = "";
+let resumeAttempts = 0;
+let resuming = false;
+
+function saveSession(): void {
+  if (!room || !myToken) return;
+  const session: StoredSession = {
+    server: serverUrl,
+    room: room.code,
+    token: myToken,
+    pad: mySource.kind === "pad" ? mySource.index : undefined,
+    seats: couchSeats.filter((seat) => seat.token).map((seat) => ({ pad: seat.pad, token: seat.token })),
+  };
+  try {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch {
+    // Without storage a refresh just starts over.
+  }
+}
+
+function forgetSession(): void {
+  myToken = "";
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {
+    // Nothing stored.
+  }
+}
+
+function storedSession(): StoredSession | undefined {
+  try {
+    const session = JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? "null") as StoredSession | null;
+    return session?.server === serverUrl && session.token ? session : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// After a refresh: take back this screen's seats, controllers included.
+function resumeStoredSession(): void {
+  const session = storedSession();
+  if (!session) return;
+  resuming = true;
+  myToken = session.token;
+  if (session.pad !== undefined) mySource = { kind: "pad", index: session.pad };
+  $("landing-status").textContent = `Rejoining room ${session.room}…`;
+  connection.send({ type: "RESUME", token: session.token });
+  for (const stored of session.seats) openCouchSeat(stored.pad, { type: "RESUME", token: stored.token }, stored.token);
+}
 
 // A shared screen: more than one person is playing on this page.
 const sharedScreen = () => couchSeats.length > 0;
@@ -176,6 +270,7 @@ $("start-night").addEventListener("click", startNight);
 
 $("leave").addEventListener("click", () => {
   removeAllCouchSeats();
+  forgetSession();
   connection.send({ type: "LEAVE_ROOM" });
   room = undefined;
   show("landing");
@@ -256,10 +351,21 @@ function renderLobby(): void {
     ...room.players.map((player) => {
       const item = document.createElement("li");
       const name = document.createElement("span");
+      name.className = "who";
       name.append(swatch(player.id), `${player.displayName}${localLabel(player.id)}`);
+      const seat = couchSeatFor(player.id);
+      if (seat) {
+        const rename = document.createElement("button");
+        rename.className = "ghost small";
+        rename.textContent = "Rename";
+        rename.title = "Or press Y on the controller for another name";
+        rename.addEventListener("click", () => editName(item, player.id, player.displayName));
+        name.append(rename);
+      }
       const tag = document.createElement("span");
-      tag.className = player.isHost || player.isReady ? "tag ok" : "tag";
-      tag.textContent = `${player.isHost ? "Host" : player.isReady ? "Ready" : "Not ready"} · ${player.score} pts`;
+      tag.className = player.away ? "tag away" : player.isHost || player.isReady ? "tag ok" : "tag";
+      const state = player.away ? "Reconnecting…" : player.isHost ? "Host" : player.isReady ? "Ready" : "Not ready";
+      tag.textContent = `${state} · ${player.score} pts`;
       item.append(name, tag);
       return item;
     }),
@@ -277,7 +383,7 @@ function renderLobby(): void {
     ? "Press <b>A</b> on the controller you want to use."
     : pads === 0
       ? "Playing on one screen? Plug in controllers, then press <b>A</b> on each one to add a player."
-      : `Playing on one screen? Press <b>A</b> on each extra controller to add a player, <b>B</b> to remove them.${
+      : `Playing on one screen? Press <b>A</b> on each extra controller to add a player, <b>Y</b> for another name, <b>B</b> to remove them.${
           mySource.kind === "pad" ? ` You're on controller ${mySource.index + 1}.` : ""
         }`;
   const claim = $<HTMLButtonElement>("claim-pad");
@@ -311,25 +417,85 @@ function renderLobby(): void {
         : "Waiting for everyone to ready up.";
 }
 
+// Swaps a lobby row's name for a text box. Enter saves, Escape cancels.
+function editName(item: HTMLElement, id: string, current: string): void {
+  const input = document.createElement("input");
+  input.value = current;
+  input.maxLength = 24;
+  input.className = "rename";
+  const save = () => {
+    const displayName = input.value.trim();
+    if (displayName && displayName !== current) sendAs(id, { type: "RENAME", displayName });
+    renderLobby();
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") save();
+    if (event.key === "Escape") renderLobby();
+  });
+  input.addEventListener("blur", save);
+  item.firstElementChild?.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
 // Couch seats -----------------------------------------------------------
 
 function addCouchSeat(pad: number): void {
   if (!room || room.phase !== "lobby" || couchSeats.length + 1 >= 8) return;
+  openCouchSeat(pad, { type: "JOIN_ROOM", roomCode: room.code, displayName: guestName(pad) });
+  renderLobby();
+}
+
+function openCouchSeat(pad: number, hello: ClientMessage, token = ""): void {
   const seatConnection = new Connection(
     serverUrl,
     (message) => onSeatMessage(seat, message),
-    () => removeCouchSeat(seat, false),
+    () => {
+      // Same as this screen's own seat: keep trying to take the seat back before giving it up.
+      if (seat.token && seat.retries < RESUME_ATTEMPTS && couchSeats.includes(seat)) {
+        seat.retries += 1;
+        window.setTimeout(() => seat.connection.send({ type: "RESUME", token: seat.token }), RESUME_DELAY_MS);
+      } else {
+        removeCouchSeat(seat, false);
+      }
+    },
   );
-  const seat: CouchSeat = { key: `pad-${pad}`, pad, connection: seatConnection, playerId: "", readied: false };
+  const seat: CouchSeat = { key: `pad-${pad}`, pad, connection: seatConnection, playerId: "", readied: Boolean(token), token, retries: 0 };
   couchSeats.push(seat);
-  seat.connection.send({ type: "JOIN_ROOM", roomCode: room.code, displayName: `Pad ${pad + 1}` });
-  renderLobby();
+  seat.connection.send(hello);
+}
+
+// Masquerade names for controller players, who can't easily type. Y in the lobby picks another.
+const GUEST_NAMES = [
+  "Count Velvet",
+  "Lady Nightshade",
+  "Baron Ash",
+  "The Marquise",
+  "Duke Hollow",
+  "Miss Raven",
+  "Sir Lark",
+  "Madame Moth",
+  "Lord Cinder",
+  "Dame Thistle",
+  "The Viscount",
+  "Lady Gloam",
+];
+
+function guestName(pad: number, current?: string): string {
+  const taken = new Set(room?.players.map((player) => player.displayName));
+  const start = current ? GUEST_NAMES.indexOf(current) + 1 : pad * 3;
+  for (let step = 0; step < GUEST_NAMES.length; step += 1) {
+    const name = GUEST_NAMES[(start + step) % GUEST_NAMES.length];
+    if (!taken.has(name)) return name;
+  }
+  return `Guest ${pad + 1}`;
 }
 
 function removeCouchSeat(seat: CouchSeat, sayGoodbye = true): void {
   const index = couchSeats.indexOf(seat);
   if (index === -1) return;
   couchSeats.splice(index, 1);
+  saveSession();
   if (sayGoodbye) seat.connection.send({ type: "LEAVE_ROOM" });
   // Give the goodbye a moment to go out before the socket closes.
   window.setTimeout(() => seat.connection.close(), 200);
@@ -344,6 +510,11 @@ function onSeatMessage(seat: CouchSeat, message: ServerMessage): void {
   switch (message.type) {
     case "ROOM_STATE":
       seat.playerId = message.playerId;
+      seat.retries = 0;
+      if (message.resumeToken && seat.token !== message.resumeToken) {
+        seat.token = message.resumeToken;
+        saveSession();
+      }
       // Everyone on this couch is here already, so extra seats come in ready.
       if (!seat.readied && message.room.phase === "lobby") {
         seat.readied = true;
@@ -356,7 +527,10 @@ function onSeatMessage(seat: CouchSeat, message: ServerMessage): void {
       return;
     case "ERROR":
       showToast(`Pad ${seat.pad + 1}: ${message.message}`);
-      if (!seat.playerId) removeCouchSeat(seat, false);
+      if (!seat.playerId) {
+        removeCouchSeat(seat, false);
+        saveSession();
+      }
       return;
   }
 }
@@ -392,6 +566,7 @@ window.addEventListener("gamepadconnected", () => room?.phase === "lobby" && ren
 window.addEventListener("gamepaddisconnected", () => room?.phase === "lobby" && renderLobby());
 
 function onPadMenu(pad: number, edges: Set<number>): void {
+  if (!$("round-intro").hidden) hideRoundIntro();
   if (!room) return;
   const mine = mySource.kind === "pad" && mySource.index === pad;
   const seat = couchSeats.find((candidate) => candidate.pad === pad);
@@ -407,6 +582,9 @@ function onPadMenu(pad: number, edges: Set<number>): void {
       addCouchSeat(pad);
     } else if (edges.has(PAD.B) && seat) {
       removeCouchSeat(seat);
+    } else if (edges.has(PAD.Y) && seat?.playerId) {
+      const current = room.players.find((player) => player.id === seat.playerId)?.displayName;
+      sendAs(seat.playerId, { type: "RENAME", displayName: guestName(pad, current) });
     } else if (edges.has(PAD.START) && hostPad && !$<HTMLButtonElement>("start-night").disabled) {
       startNight();
     }
@@ -747,6 +925,10 @@ function renderNightOver(): void {
       return step;
     }),
   );
+  if (!nightOverPlayed) {
+    nightOverPlayed = true;
+    sound.play("win");
+  }
   const reveal = night.moleReveal;
   const moleLine = $("mole-reveal");
   moleLine.hidden = !reveal;
@@ -841,24 +1023,53 @@ function showRoundIntro(): void {
   const intro = $("round-intro");
   window.clearTimeout(introTimer);
   intro.hidden = true;
-  if (!night) return;
-  const finale = !night.current && Boolean(night.finalists);
-  const mansionRoom = night.current ? MANSION_ROOMS.find((candidate) => candidate.key === night.current) : undefined;
+  if (!room) return;
+  const finale = Boolean(night && !night.current && night.finalists);
+  const mansionRoom = MANSION_ROOMS.find((candidate) => candidate.key === night?.current)
+    ?? (night ? undefined : MANSION_ROOMS.find((candidate) => candidate.minigameId === room!.selectedMinigameId));
   if (!finale && !mansionRoom) return;
   const mode = MODES.find((candidate) => candidate.id === mansionRoom?.minigameId);
   $("intro-icon").innerHTML = roomIcon(finale ? "ballroom" : mansionRoom!.key);
-  $("intro-round").textContent = finale ? "The final dance" : `Round ${night.roundsPlayed + 1} of ${night.totalRounds}`;
+  $("intro-round").textContent = finale ? "The final dance" : night ? `Round ${night.roundsPlayed + 1} of ${night.totalRounds}` : "Quick play";
   $("intro-room").textContent = finale ? "The Ballroom" : mansionRoom!.name;
-  $("intro-mode").textContent = finale ? `${night.finalists!.map(nameOf).join(" vs ")}` : (mode?.name ?? "");
+  $("intro-mode").textContent = finale ? `${night!.finalists!.map(nameOf).join(" vs ")}` : (mode?.name ?? "");
   $("intro-blurb").textContent = finale
     ? "Hit the other finalist to win the night. Everyone else steers a guest."
     : (mode?.blurb ?? "");
+  $("intro-controls").textContent = controlsLine();
+  // The first time someone meets a room the card stays up longer; any key, click or button dismisses it.
+  const key = finale ? "ballroom" : mansionRoom!.key;
+  const firstTime = !seenRooms().includes(key);
+  if (firstTime) markRoomSeen(key);
+  intro.classList.toggle("first", firstTime);
   intro.hidden = false;
   intro.classList.remove("leaving");
-  introTimer = window.setTimeout(() => {
-    intro.classList.add("leaving");
-    introTimer = window.setTimeout(() => (intro.hidden = true), 400);
-  }, 3200);
+  introTimer = window.setTimeout(hideRoundIntro, firstTime ? 8000 : 3200);
+}
+
+function hideRoundIntro(): void {
+  const intro = $("round-intro");
+  if (intro.hidden || intro.classList.contains("leaving")) return;
+  window.clearTimeout(introTimer);
+  intro.classList.add("leaving");
+  introTimer = window.setTimeout(() => (intro.hidden = true), 400);
+}
+
+for (const type of ["keydown", "pointerdown"]) window.addEventListener(type, () => !$("round-intro").hidden && hideRoundIntro());
+
+function controlsLine(): string {
+  if (window.matchMedia("(pointer: coarse)").matches && !sharedScreen()) return "Stick to move · Act button to act · Tap the crowd to shoot · Hold Run to run";
+  if (mySource.kind === "pad" || sharedScreen()) return "Stick to move · A acts · X shoots · RB runs";
+  return "WASD or arrows to move · E acts · Click shoots · Shift runs";
+}
+
+const SEEN_KEY = "morbid-masquerade:seen-rooms";
+function seenRooms(): string[] {
+  return (readStored(SEEN_KEY) ?? "").split(",").filter(Boolean);
+}
+
+function markRoomSeen(key: string): void {
+  writeStored(SEEN_KEY, [...seenRooms(), key].join(","));
 }
 
 function stopGame(): void {
@@ -944,9 +1155,15 @@ function onMessage(message: ServerMessage): void {
   switch (message.type) {
     case "ROOM_STATE": {
       $("landing-status").textContent = "";
+      if (resumeAttempts > 0 || resuming) showToast("Back in the room.", "info");
+      resumeAttempts = 0;
+      resuming = false;
       room = message.room;
       playerId = message.playerId;
+      if (message.resumeToken) myToken = message.resumeToken;
+      saveSession();
       if (room.selectedMinigameId.startsWith("crowd_")) selectedMode = room.selectedMinigameId;
+      if (room.phase !== "night_over") nightOverPlayed = false;
       history.replaceState(null, "", `?room=${room.code}${serverQuery()}`);
       if (room.phase === "lobby") {
         stopGame();
@@ -984,6 +1201,16 @@ function onMessage(message: ServerMessage): void {
     case "ERROR":
       showToast(message.message);
       $("landing-status").textContent = message.message;
+      // The seat couldn't be taken back: start over from the landing screen.
+      if (resuming || resumeAttempts > 0) {
+        resuming = false;
+        resumeAttempts = 0;
+        forgetSession();
+        removeAllCouchSeats();
+        room = undefined;
+        stopGame();
+        show("landing");
+      }
       return;
   }
 }
@@ -997,8 +1224,9 @@ function show(name: keyof typeof screens): void {
   for (const [key, element] of Object.entries(screens)) element.hidden = key !== name;
 }
 
-function showToast(text: string): void {
+function showToast(text: string, kind: "error" | "info" = "error"): void {
   const toast = $("toast");
+  toast.classList.toggle("info", kind === "info");
   toast.textContent = text;
   toast.hidden = false;
   window.clearTimeout(toastTimer);
@@ -1020,3 +1248,5 @@ function writeStored(key: string, value: string): void {
     // Remembering the name is a convenience only.
   }
 }
+
+resumeStoredSession();

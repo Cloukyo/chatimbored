@@ -16,9 +16,10 @@ import { type Random, shuffle } from "./random.js";
 
 const MAX_QUEUED_INPUTS = 4;
 const EVENT_WINDOW_TICKS = 40;
-const ENTITY_RADIUS = 14;
-// Aimed shots from above hit whoever stands within this of the floor point aimed at.
-const AIMED_HIT_RADIUS = 16;
+// A shot at a floor point hits whoever stands within this of it.
+const SHOT_HIT_RADIUS = 16;
+// How far a named target may have moved from where the shooter saw them, which covers network lag.
+const NAMED_TARGET_DRIFT = 160;
 
 export type CrowdEntity = {
   id: number;
@@ -213,7 +214,7 @@ export class CrowdMatch {
       }
       if (entity.dead || entity.brain) continue;
       if (entity.hidden) {
-        if (input?.shoot && slot.shots > 0) this.shoot(slot, input.shoot);
+        if (input?.shoot && slot.shots > 0) this.shoot(slot, input.shoot, input.shootAt);
         if (this.result) return;
         continue;
       }
@@ -226,7 +227,7 @@ export class CrowdMatch {
       entity.running = slot.lastRun && (slot.lastDirection.x !== 0 || slot.lastDirection.y !== 0);
       this.move(entity);
       if (!input) continue;
-      if (input.shoot && slot.shots > 0) this.shoot(slot, input.shoot);
+      if (input.shoot && slot.shots > 0) this.shoot(slot, input.shoot, input.shootAt);
       if (this.result) return;
       if (input.act && slot.actCooldownMs <= 0) this.withActor(slot, () => this.rules.onAct?.(this, slot));
     }
@@ -475,45 +476,39 @@ export class CrowdMatch {
     entity.facing = facingOf(entity.direction, entity.facing);
   }
 
-  private shoot(slot: CrowdSlot, target: CrowdVector): void {
+  private shoot(slot: CrowdSlot, point: CrowdVector, targetId?: number): void {
     slot.shots -= 1;
     slot.shotsFired += 1;
     const before = slot.takedowns.length;
-    this.resolveShot(slot, target);
+    this.resolveShot(slot, point, targetId);
     if (slot.takedowns.length === before) slot.wastedShots += 1;
   }
 
-  private resolveShot(slot: CrowdSlot, target: CrowdVector): void {
-    if (this.rules.shotStyle?.(slot.role) === "aimed") {
-      this.aimedShot(slot, target);
-      return;
-    }
-    const from = { x: slot.entity.x, y: slot.entity.y };
-    const end = rayToEdge(from, target, this.arena);
-    let best: { entity: CrowdEntity; distance: number; point: CrowdVector } | undefined;
-    for (const entity of this.entities) {
-      if (entity === slot.entity || entity.dead || entity.hidden) continue;
-      const hit = segmentHit(from, end, entity, ENTITY_RADIUS);
-      if (hit && (!best || hit.distance < best.distance)) best = { entity, ...hit };
-    }
-    this.emit({ type: "shot", from, to: best?.point ?? end });
-    this.options.observer?.onShot?.(this, slot, from, best?.point ?? end, best?.entity);
-    if (best) this.withActor(slot, () => this.rules.onShotHit(this, slot, best!.entity));
+  // Aiming isn't a skill here: whoever the player pointed at is shot, and nobody in between gets in the way.
+  // "Aimed" shots (Lookouts, from above) drop as an arrow; the rest fly from the shooter's figure.
+  private resolveShot(slot: CrowdSlot, point: CrowdVector, targetId?: number): void {
+    const hit = this.shotTarget(slot, point, targetId);
+    const to = hit ? { x: hit.x, y: hit.y } : { x: Math.round(point.x), y: Math.round(point.y) };
+    const aimed = this.rules.shotStyle?.(slot.role) === "aimed";
+    const from = aimed ? to : { x: slot.entity.x, y: slot.entity.y };
+    // An arrow is drawn falling in from the top of the screen.
+    this.emit({ type: "shot", from: aimed ? { x: to.x - 60, y: -40 } : from, to });
+    this.options.observer?.onShot?.(this, slot, from, to, hit);
+    if (hit) this.withActor(slot, () => this.rules.onShotHit(this, slot, hit));
   }
 
-  // An arrow from above: drops on the floor point aimed at and hits whoever stands closest to it.
-  // Clients turn a click on someone's figure into the point at their feet.
-  private aimedShot(slot: CrowdSlot, target: CrowdVector): void {
+  // The entity the client named, if it's still there to be shot near where they saw it; otherwise whoever stands closest to the point.
+  private shotTarget(slot: CrowdSlot, point: CrowdVector, targetId?: number): CrowdEntity | undefined {
+    const shootable = (entity: CrowdEntity) => entity !== slot.entity && !entity.dead && !entity.hidden;
+    const named = targetId === undefined ? undefined : this.entities.find((entity) => entity.id === targetId);
+    if (named && shootable(named) && Math.hypot(named.x - point.x, named.y - point.y) <= NAMED_TARGET_DRIFT) return named;
     let best: { entity: CrowdEntity; distance: number } | undefined;
     for (const entity of this.entities) {
-      if (entity.dead || entity.hidden) continue;
-      const distance = Math.hypot(entity.x - target.x, entity.y - target.y);
-      if (distance <= AIMED_HIT_RADIUS && (!best || distance < best.distance)) best = { entity, distance };
+      if (!shootable(entity)) continue;
+      const distance = Math.hypot(entity.x - point.x, entity.y - point.y);
+      if (distance <= SHOT_HIT_RADIUS && (!best || distance < best.distance)) best = { entity, distance };
     }
-    const to = best ? { x: best.entity.x, y: best.entity.y } : { x: target.x, y: target.y };
-    this.emit({ type: "shot", from: { x: to.x - 60, y: -40 }, to });
-    this.options.observer?.onShot?.(this, slot, to, to, best?.entity);
-    if (best) this.withActor(slot, () => this.rules.onShotHit(this, slot, best!.entity));
+    return best?.entity;
   }
 }
 
@@ -527,26 +522,3 @@ function stateOf(entity: CrowdEntity): CrowdEntityState {
   return entity.running ? CROWD_STATE.RUN : CROWD_STATE.WALK;
 }
 
-function rayToEdge(from: CrowdVector, toward: CrowdVector, arena: CrowdArena): CrowdVector {
-  const dx = toward.x - from.x;
-  const dy = toward.y - from.y;
-  const length = Math.hypot(dx, dy);
-  if (!Number.isFinite(length) || length < 0.001) return from;
-  const reach = Math.hypot(arena.width, arena.height);
-  return { x: from.x + (dx / length) * reach, y: from.y + (dy / length) * reach };
-}
-
-function segmentHit(
-  start: CrowdVector,
-  end: CrowdVector,
-  target: CrowdVector,
-  radius: number,
-): { distance: number; point: CrowdVector } | undefined {
-  const segment = { x: end.x - start.x, y: end.y - start.y };
-  const lengthSquared = segment.x * segment.x + segment.y * segment.y;
-  if (lengthSquared < 0.001) return undefined;
-  const t = Math.max(0, Math.min(1, ((target.x - start.x) * segment.x + (target.y - start.y) * segment.y) / lengthSquared));
-  const point = { x: start.x + segment.x * t, y: start.y + segment.y * t };
-  if (Math.hypot(target.x - point.x, target.y - point.y) > radius) return undefined;
-  return { distance: Math.hypot(point.x - start.x, point.y - start.y), point: { x: Math.round(point.x), y: Math.round(point.y) } };
-}

@@ -69,6 +69,8 @@ const FLOOR_STYLES: Record<CrowdView["mode"], FloorStyle> = {
   last_dance: "ballroom",
 };
 
+// Who a shot is at: the figure pointed at, if any, and the floor point under the pointer.
+type Shot = { at: CrowdVector; id?: number };
 type Tag = { figure: Figure; label: string; color: string };
 type Snapshot = { time: number; figures: Map<number, Figure> };
 type Pending = { seq: number; direction: CrowdVector; run: boolean };
@@ -87,6 +89,11 @@ const KEYS = {
 
 // How far ahead of a controller player their shot is aimed, along the stick or the way they face.
 const PAD_SHOT_REACH = 400;
+// A controller shot picks the person nearest the stick's line within this angle either side, and this far away.
+const PAD_SHOT_CONE = Math.PI / 7;
+const PAD_SHOT_RANGE = 900;
+// A controller Lookout's cursor picks whoever is within this of it.
+const PAD_CURSOR_REACH = 40;
 const PAD_CURSOR_SPEED = 900;
 const PULSE_MS = { holding: 1000, holdingLate: 500, dark: 450, invite: 3000 };
 
@@ -105,7 +112,7 @@ type SeatState = {
   seat: GameSeat;
   view?: CrowdView;
   seq: number;
-  pendingShot?: CrowdVector;
+  pendingShot?: Shot;
   pendingAct: boolean;
   // A controller Lookout aims with an on-screen cursor instead of the mouse.
   cursor?: CrowdVector;
@@ -408,7 +415,10 @@ export class CrowdGame {
     // After a reconnect the server has already seen higher numbers than this fresh page.
     state.seq = Math.max(state.seq, view.ack) + 1;
     const input: CrowdInput = { kind: "crowd", seq: state.seq, move, run, act: state.pendingAct };
-    if (state.pendingShot && canShoot(view)) input.shoot = roundPoint(state.pendingShot);
+    if (state.pendingShot && canShoot(view)) {
+      input.shoot = roundPoint(state.pendingShot.at);
+      if (state.pendingShot.id !== undefined) input.shootAt = state.pendingShot.id;
+    }
     state.pendingShot = undefined;
     state.pendingAct = false;
     state.seat.send(input);
@@ -442,15 +452,35 @@ export class CrowdGame {
     };
   }
 
-  // Controller shots fly along the right stick, or the way the figure faces if the stick is idle.
-  private padShotTarget(state: SeatState, view: CrowdView, pad: Gamepad): CrowdVector | undefined {
-    if (aimsFromAbove(view)) return state.cursor;
+  // Controller shots go to whoever is nearest the right stick's direction (or the way the figure faces if the stick is idle).
+  // A Lookout's cursor picks whoever is nearest it.
+  private padShotTarget(state: SeatState, view: CrowdView, pad: Gamepad): Shot | undefined {
+    const latest = this.snapshots[this.snapshots.length - 1];
+    const candidates = latest ? [...latest.figures.values()].filter((figure) => figure.id !== view.you && figure.state !== CROWD_STATE.DEAD) : [];
+    if (aimsFromAbove(view)) {
+      if (!state.cursor) return undefined;
+      const cursor = state.cursor;
+      const nearest = closest(candidates, (figure) => {
+        const distance = Math.hypot(figure.x - cursor.x, figure.y - cursor.y);
+        return distance <= PAD_CURSOR_REACH ? distance : undefined;
+      });
+      return nearest ? { at: { x: nearest.x, y: nearest.y }, id: nearest.id } : { at: cursor };
+    }
     const self = this.latestFigure(view.you);
     if (!self) return undefined;
     const from = !this.shared && this.predicted ? this.predicted.to : self;
     const aim = padAim(pad);
     const angle = aim.x !== 0 || aim.y !== 0 ? Math.atan2(aim.y, aim.x) : (self.facing * Math.PI) / 4;
-    return { x: from.x + Math.cos(angle) * PAD_SHOT_REACH, y: from.y + Math.sin(angle) * PAD_SHOT_REACH };
+    const nearest = closest(candidates, (figure) => {
+      const distance = Math.hypot(figure.x - from.x, figure.y - from.y);
+      let off = Math.abs(Math.atan2(figure.y - from.y, figure.x - from.x) - angle);
+      if (off > Math.PI) off = Math.PI * 2 - off;
+      if (distance < 1 || distance > PAD_SHOT_RANGE || off > PAD_SHOT_CONE) return undefined;
+      // Mostly whoever is closest to the line, with a nudge toward nearer people.
+      return off + distance / PAD_SHOT_RANGE / 10;
+    });
+    if (nearest) return { at: { x: nearest.x, y: nearest.y }, id: nearest.id };
+    return { at: { x: from.x + Math.cos(angle) * PAD_SHOT_REACH, y: from.y + Math.sin(angle) * PAD_SHOT_REACH } };
   }
 
   private selfFrozen(): boolean {
@@ -618,7 +648,7 @@ export class CrowdGame {
         ];
       case "last_dance":
         return view.role === "backer"
-          ? ["You're backing a finalist", "Steer your guest to get in the way"]
+          ? ["You're backing a finalist", "Steer your guest to crowd round your finalist"]
           : ["Hit the other finalist to win the night", shot("them"), "A miss makes nearby guests flinch", "The floor is shrinking"];
     }
   }
@@ -641,12 +671,13 @@ export class CrowdGame {
     this.canvas.height = Math.round(this.canvas.clientHeight * ratio);
   }
 
-  // A click on someone's figure aims at their feet, which is where the server looks for them,
-  // at the newest position this screen has for them. Anywhere else aims at the floor under the cursor.
-  private aimPoint(event: PointerEvent): CrowdVector | undefined {
+  // A click on someone's figure shoots them, named by id with the newest position this screen has for them.
+  // A click on empty floor shoots at the floor, which hits whoever the server finds standing there.
+  private aimPoint(event: PointerEvent): Shot | undefined {
     const floor = this.arenaPoint(event);
     const latest = this.snapshots[this.snapshots.length - 1];
-    if (!this.view || !latest) return floor;
+    if (!floor) return undefined;
+    if (!this.view || !latest) return { at: floor };
     const rect = this.canvas.getBoundingClientRect();
     const click = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     const own = this.keyboardSeat()?.view?.you;
@@ -658,7 +689,7 @@ export class CrowdGame {
       if (distance <= reach && (!best || distance < best.distance)) best = { id: figure.id, distance };
     }
     const target = best && latest.figures.get(best.id);
-    return target ? { x: target.x, y: target.y } : floor;
+    return target ? { at: { x: target.x, y: target.y }, id: target.id } : { at: floor };
   }
 
   // Where a figure stands on screen, in CSS pixels: feet, top of the head, and how far either side of that line counts as on them.
@@ -966,6 +997,16 @@ function unpack(packed: number[]): Map<number, Figure> {
     figures.set(id, { id, x: packed[index + 1], y: packed[index + 2], facing: packed[index + 3], state: packed[index + 4] as CrowdEntityState });
   }
   return figures;
+}
+
+// The item with the lowest score, skipping any scored undefined.
+function closest<T>(items: T[], score: (item: T) => number | undefined): T | undefined {
+  let best: { item: T; score: number } | undefined;
+  for (const item of items) {
+    const value = score(item);
+    if (value !== undefined && (!best || value < best.score)) best = { item, score: value };
+  }
+  return best?.item;
 }
 
 function distanceToSegment(point: CrowdVector, start: CrowdVector, end: CrowdVector): number {

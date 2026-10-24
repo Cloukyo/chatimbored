@@ -81,6 +81,7 @@ function readPlayerInput(value: unknown): PlayerInputPayload {
       move: readVector(input.move),
       run: input.run === true,
       shoot: readOptionalPoint(input.shoot),
+      shootAt: Number.isInteger(input.shootAt) ? (input.shootAt as number) : undefined,
       act: input.act === true,
     };
   }

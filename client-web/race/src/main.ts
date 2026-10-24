@@ -346,8 +346,9 @@ function readDriver(driver: Driver): { steer: number; throttle: number } {
   }
   if (driver === me && isTouch) {
     steer += (touch.right ? 1 : 0) - (touch.left ? 1 : 0);
-    // On a phone the gas is always down, so two thumbs are enough.
-    gas = Math.max(gas, touch.brake ? 0 : 1);
+    // On a phone the gas is always down, so two thumbs are enough. Not once you're out: then it would drag the air-strike sight.
+    const out = lastRace?.cars.find((car) => car.id === me.playerId)?.state === "out";
+    gas = Math.max(gas, touch.brake || out ? 0 : 1);
     brake = Math.max(brake, touch.brake ? 1 : 0);
   }
   const pad = driver.pad === undefined ? undefined : readPad(driver.pad);

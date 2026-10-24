@@ -1,4 +1,4 @@
-import type { RaceCar, RaceEvent, RaceView, WeaponKind } from "../../../shared/race/protocol.js";
+import { LOCKING_WEAPONS, type RaceCar, type RaceEvent, type RaceShot, type RaceView, type WeaponKind } from "../../../shared/race/protocol.js";
 import { VERGE_WIDTH, locate, pointAt, trackById, type Track, type TrackTheme } from "../../../shared/race/track.js";
 import { sound } from "./sound.js";
 
@@ -10,7 +10,20 @@ const CAR_WIDTH = 20;
 const INTERPOLATION_MS = 100;
 const FALL_MS = 900;
 
-const WEAPON_ICONS: Record<WeaponKind, string> = { rocket: "🚀", mines: "💣", oil: "🛢️", shockwave: "💥", nitro: "🔥" };
+export const WEAPON_ICONS: Record<WeaponKind, string> = {
+  missile: "🚀",
+  machinegun: "🔫",
+  shotgun: "💥",
+  mortar: "🎯",
+  mines: "💣",
+  drums: "🛢️",
+  oil: "⚫",
+  flamethrower: "🔥",
+  flashbang: "✨",
+};
+// Every car in a match gets its own body, by its colour slot.
+const BODIES = ["muscle", "buggy", "van", "mini"] as const;
+const HOT = ["HOT HOT HOT!", "OW OW OW!", "TOASTY!", "FIRE!!"];
 const BONKS = ["BONK!", "CLANG!", "WHAM!", "CRUNCH!", "BOINK!", "THUD!", "DOINK!"];
 const BYES = ["SEE YA!", "BYE!", "WRECKED!", "YEET!", "OOPS!", "NOPE!", "LATER!", "TOAST!"];
 const FALLS: Record<TrackTheme, string[]> = {
@@ -58,6 +71,8 @@ export class RaceRenderer {
   private fallingSince = new Map<string, number>();
   private banner?: Banner;
   private shake = 0;
+  // Seconds of flash-bang whiteout left. On a shared screen it blinds everyone, the thrower too.
+  private flash = 0;
   private lastFrame = 0;
   private lastCountdown = 0;
   private lastPhase = "";
@@ -77,6 +92,7 @@ export class RaceRenderer {
     this.eyes.clear();
     this.fallingSince.clear();
     this.banner = undefined;
+    this.flash = 0;
     this.lastPhase = "";
   }
 
@@ -158,19 +174,28 @@ export class RaceRenderer {
     }
 
     const cars = [...view.cars].sort((a, b) => a.z - b.z);
+    for (const shot of view.shots) if (shot.kind === "mortar" || shot.kind === "strike") this.drawTarget(shot, now);
     for (const car of cars) if (car.state !== "out") this.drawShadow(car);
     for (const car of cars) this.updateSkids(car);
+    for (const car of cars) this.drawSight(car, view);
     for (const car of cars) if (car.state !== "out") this.drawCar(car, now, dt);
-    for (const rocket of view.rockets) this.drawRocket(rocket.x, rocket.y, rocket.angle);
+    for (const shot of view.shots) this.drawShot(shot, now);
     this.drawParticles(dt);
     for (const car of cars) if (car.state === "driving") this.drawTag(car, view);
+    for (const car of cars) if (car.strike) this.drawCrosshair(car, now);
     this.drawPopups(dt);
     ctx.restore();
 
     this.drawScreenEdge(view, scale, width, height, now);
+    this.drawWarnings(view, scale, width, height, now);
     this.drawYeets(dt, width, height, scale);
     this.drawHud(view, width);
     this.drawBanner(dt, width, height);
+    if (this.flash > 0) {
+      this.flash = Math.max(0, this.flash - dt);
+      ctx.fillStyle = `rgba(255,255,250,${Math.min(1, this.flash / 0.9)})`;
+      ctx.fillRect(0, 0, width, height);
+    }
   }
 
   // Where a world point lands on the canvas right now, for things that leave the world (a yeeted car).
@@ -220,9 +245,41 @@ export class RaceRenderer {
         sound.play("pickup");
         break;
       }
-      case "fire":
-        sound.play(event.weapon === "nitro" ? "honk" : "fire");
+      case "fire": {
+        const car = carOf(event.car);
+        if (car) this.muzzle(car, event.weapon);
+        sound.play(event.weapon === "machinegun" ? "gun" : event.weapon === "shotgun" ? "shotgun" : event.weapon === "flashbang" ? "beep" : "fire");
         break;
+      }
+      case "hit":
+        for (let index = 0; index < 6; index += 1) {
+          const angle = Math.random() * Math.PI * 2;
+          this.particles.push({ x: event.x, y: event.y, vx: Math.cos(angle) * 160, vy: Math.sin(angle) * 160, life: 0.25, max: 0.25, size: 3, color: "#ffe36b", grow: -6 });
+        }
+        sound.play("bonk", 0.4);
+        break;
+      case "burn": {
+        const car = carOf(event.car);
+        if (car) this.popup(car.x, car.y - 30, pick(HOT), "#ff8c2e", 22);
+        sound.play("fire");
+        break;
+      }
+      case "flash":
+        this.flash = 1.6;
+        sound.play("flash");
+        break;
+      case "turbo": {
+        const car = carOf(event.car);
+        if (car) this.popup(car.x, car.y - 30, "TURBO!", "#7bd33f", 22);
+        sound.play("honk");
+        break;
+      }
+      case "stall": {
+        const car = carOf(event.car);
+        if (car) this.popup(car.x, car.y - 30, pick(["STALLED!", "PUTT PUTT…", "CLUNK"]), "#bbbbbb", 20);
+        sound.play("stall");
+        break;
+      }
       case "splash": {
         this.popup(event.x, event.y - 20, pick(FALLS[theme]), theme === "harbour" ? "#bfe7ff" : "#ffffff", 26);
         if (theme === "harbour") {
@@ -250,7 +307,10 @@ export class RaceRenderer {
       case "round": {
         if (view.matchWinner) break;
         const winner = event.winner ? carOf(event.winner) : undefined;
-        this.setBanner(winner ? `${winner.name.toUpperCase()} SURVIVES!` : "NOBODY SURVIVES!", winner ? CAR_COLORS[winner.color] : "#fff", 3, "+1 point");
+        const second = event.second ? carOf(event.second) : undefined;
+        const first = event.first ? carOf(event.first) : undefined;
+        const tally = [winner && `+2 ${winner.name}`, second && `+1 ${second.name}`, first && `−1 ${first.name}`].filter(Boolean).join("   ");
+        this.setBanner(winner ? `${winner.name.toUpperCase()} SURVIVES!` : "NOBODY SURVIVES!", winner ? CAR_COLORS[winner.color] : "#fff", 3, tally || undefined);
         sound.play("fanfare");
         break;
       }
@@ -473,15 +533,7 @@ export class RaceRenderer {
       roundRect(ctx, x - 5, y - 3, 10, 6, 2);
       ctx.fill();
     }
-    ctx.fillStyle = color;
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 2;
-    roundRect(ctx, -CAR_LENGTH / 2, -CAR_WIDTH / 2 + 1, CAR_LENGTH, CAR_WIDTH - 2, 7);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "rgba(255,255,255,0.25)";
-    roundRect(ctx, -CAR_LENGTH / 2 + 4, -CAR_WIDTH / 2 + 3, CAR_LENGTH - 14, 4, 2);
-    ctx.fill();
+    drawBody(ctx, BODIES[car.color % BODIES.length], color);
     // Big googly eyes on the windscreen. They wobble with every bump.
     const eyes = this.wobble(car, dt);
     for (const side of [-1, 1]) {
@@ -495,6 +547,7 @@ export class RaceRenderer {
     }
     ctx.restore();
 
+    if (car.state === "driving") this.carEffects(car);
     if (car.dizzy > 0 && car.state === "driving") {
       ctx.font = "12px system-ui, sans-serif";
       ctx.textAlign = "center";
@@ -569,28 +622,220 @@ export class RaceRenderer {
     ctx.restore();
   }
 
-  private drawRocket(x: number, y: number, angle: number): void {
+  // Fire on a burning car, the flamethrower's jet, smoke from a stalled engine.
+  private carEffects(car: RaceCar): void {
+    const backX = -Math.cos(car.angle);
+    const backY = -Math.sin(car.angle);
+    if (car.burning) {
+      this.particles.push({ x: car.x + (Math.random() - 0.5) * 16, y: car.y - car.z * 0.7 + (Math.random() - 0.5) * 10, vx: 0, vy: -60, life: 0.4, max: 0.4, size: 6, color: pick(["#ffb23f", "#ff6b2e", "#ffe36b"]), grow: -8 });
+    }
+    if (car.flaming) {
+      for (let index = 0; index < 3; index += 1) {
+        const spread = (Math.random() - 0.5) * 0.5;
+        const speed = 350 + Math.random() * 150;
+        this.particles.push({
+          x: car.x + backX * 18,
+          y: car.y + backY * 18,
+          vx: (backX * Math.cos(spread) - backY * Math.sin(spread)) * speed + car.vx,
+          vy: (backY * Math.cos(spread) + backX * Math.sin(spread)) * speed + car.vy,
+          life: 0.4,
+          max: 0.4,
+          size: 7,
+          color: pick(["#ffb23f", "#ff6b2e", "#ffe36b"]),
+          grow: 18,
+        });
+      }
+    }
+    if (car.stalled && Math.random() < 0.4) {
+      this.particles.push({ x: car.x - backX * 12, y: car.y - backY * 12, vx: (Math.random() - 0.5) * 30, vy: -40, life: 0.8, max: 0.8, size: 5, color: "rgba(60,60,60,0.7)", grow: 14 });
+    }
+  }
+
+  private muzzle(car: RaceCar, weapon: WeaponKind): void {
+    const fx = Math.cos(car.angle);
+    const fy = Math.sin(car.angle);
+    const flashAt = (x: number, y: number, dx: number, dy: number) => {
+      for (let index = 0; index < 5; index += 1) {
+        this.particles.push({ x, y, vx: dx * (200 + Math.random() * 200) + (Math.random() - 0.5) * 80, vy: dy * (200 + Math.random() * 200) + (Math.random() - 0.5) * 80, life: 0.18, max: 0.18, size: 6, color: "#fff2a0", grow: -10 });
+      }
+    };
+    if (weapon === "shotgun") {
+      flashAt(car.x - fy * 14, car.y + fx * 14, -fy, fx);
+      flashAt(car.x + fy * 14, car.y - fx * 14, fy, -fx);
+      this.shake = Math.min(20, this.shake + 6);
+    } else if (weapon === "mortar") {
+      this.particles.push({ x: car.x, y: car.y, vx: 0, vy: -40, life: 0.6, max: 0.6, size: 8, color: "rgba(200,200,200,0.7)", grow: 20 });
+    }
+  }
+
+  // Locking weapons show a laser sight: green while searching, red on a target.
+  private drawSight(car: RaceCar, view: RaceView): void {
+    if (car.state !== "driving" || !car.weapon || !LOCKING_WEAPONS.includes(car.weapon)) return;
     const ctx = this.context;
-    this.particles.push({ x: x - Math.cos(angle) * 12, y: y - Math.sin(angle) * 12, vx: 0, vy: 0, life: 0.5, max: 0.5, size: 6, color: "rgba(220,220,220,0.6)", grow: 16 });
+    const target = car.lock ? view.cars.find((other) => other.id === car.lock) : undefined;
+    ctx.lineWidth = 2;
+    if (target) {
+      ctx.strokeStyle = "rgba(255,40,40,0.85)";
+      ctx.beginPath();
+      ctx.moveTo(car.x, car.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.stroke();
+      ctx.strokeStyle = "#ff2828";
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, 22, 0, Math.PI * 2);
+      ctx.stroke();
+      return;
+    }
+    ctx.strokeStyle = "rgba(90,255,90,0.6)";
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(car.x, car.y);
+    ctx.lineTo(car.x + Math.cos(car.angle) * 260, car.y + Math.sin(car.angle) * 260);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Where a lobbed mortar or an air strike is coming down.
+  private drawTarget(shot: RaceShot, now: number): void {
+    if (shot.tx === undefined || shot.ty === undefined) return;
+    const ctx = this.context;
+    const pulse = 1 + Math.sin(now / 60) * 0.12;
+    ctx.strokeStyle = shot.kind === "strike" ? "rgba(255,40,40,0.9)" : "rgba(255,200,40,0.9)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(shot.tx, shot.ty, 30 * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    circle(ctx, shot.x, shot.y, 6 + Math.max(0, 14 - shot.z / 40));
+  }
+
+  private drawShot(shot: RaceShot, now: number): void {
+    const ctx = this.context;
     ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(angle);
-    ctx.fillStyle = "#ddd";
-    roundRect(ctx, -10, -4, 20, 8, 4);
-    ctx.fill();
-    ctx.fillStyle = "#e0312b";
-    ctx.beginPath();
-    ctx.moveTo(10, -4);
-    ctx.lineTo(16, 0);
-    ctx.lineTo(10, 4);
-    ctx.fill();
-    ctx.fillStyle = "#ffb23f";
-    ctx.beginPath();
-    ctx.moveTo(-10, -3);
-    ctx.lineTo(-18 - Math.random() * 6, 0);
-    ctx.lineTo(-10, 3);
-    ctx.fill();
+    switch (shot.kind) {
+      case "bullet":
+        ctx.strokeStyle = "#ffe36b";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(shot.x, shot.y);
+        ctx.lineTo(shot.x - Math.cos(shot.angle) * 22, shot.y - Math.sin(shot.angle) * 22);
+        ctx.stroke();
+        break;
+      case "missile":
+        this.particles.push({ x: shot.x - Math.cos(shot.angle) * 12, y: shot.y - Math.sin(shot.angle) * 12, vx: 0, vy: 0, life: 0.5, max: 0.5, size: 6, color: "rgba(220,220,220,0.6)", grow: 16 });
+        ctx.translate(shot.x, shot.y);
+        ctx.rotate(shot.angle);
+        ctx.fillStyle = "#ddd";
+        roundRect(ctx, -10, -4, 20, 8, 4);
+        ctx.fill();
+        ctx.fillStyle = "#e0312b";
+        ctx.beginPath();
+        ctx.moveTo(10, -4);
+        ctx.lineTo(16, 0);
+        ctx.lineTo(10, 4);
+        ctx.fill();
+        ctx.fillStyle = "#ffb23f";
+        ctx.beginPath();
+        ctx.moveTo(-10, -3);
+        ctx.lineTo(-18 - Math.random() * 6, 0);
+        ctx.lineTo(-10, 3);
+        ctx.fill();
+        break;
+      case "mortar":
+        ctx.translate(shot.x, shot.y - shot.z * 0.7);
+        ctx.fillStyle = "#333";
+        ctx.strokeStyle = "#000";
+        circle(ctx, 0, 0, 7 + shot.z / 60);
+        break;
+      case "strike": {
+        // A bomb dropping towards the camera's floor: it grows as it falls.
+        ctx.translate(shot.x, shot.y - shot.z * 0.4);
+        const size = 6 + (600 - shot.z) / 60;
+        ctx.fillStyle = "#444";
+        circle(ctx, 0, 0, size);
+        ctx.fillStyle = "#e0312b";
+        circle(ctx, 0, -size * 0.6, size * 0.4);
+        break;
+      }
+      case "drum":
+        ctx.translate(shot.x, shot.y);
+        ctx.rotate(shot.angle);
+        ctx.fillStyle = Math.floor(now / 120) % 2 === 0 ? "#d8322a" : "#9c1f19";
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 2;
+        roundRect(ctx, -9, -11, 18, 22, 3);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#ffe36b";
+        ctx.fillRect(-9, -2, 18, 4);
+        break;
+    }
     ctx.restore();
+  }
+
+  // A knocked-out player's air-strike sight, in their colour.
+  private drawCrosshair(car: RaceCar, now: number): void {
+    const strike = car.strike!;
+    const ctx = this.context;
+    const color = CAR_COLORS[car.color % CAR_COLORS.length];
+    const size = strike.ready ? 26 + Math.sin(now / 120) * 4 : 20;
+    ctx.save();
+    ctx.globalAlpha = strike.ready ? 1 : 0.45;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(strike.x, strike.y, size, 0, Math.PI * 2);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      ctx.moveTo(strike.x + dx * size * 0.5, strike.y + dy * size * 0.5);
+      ctx.lineTo(strike.x + dx * size * 1.4, strike.y + dy * size * 1.4);
+    }
+    ctx.stroke();
+    ctx.font = "bold 12px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#000";
+    const label = `☠ ${car.name}${strike.ready ? "" : "…"}`;
+    ctx.strokeText(label, strike.x, strike.y + size + 6);
+    ctx.fillStyle = color;
+    ctx.fillText(label, strike.x, strike.y + size + 6);
+    ctx.restore();
+  }
+
+  // A car off the screen: a marker on the nearest edge with the seconds it has left to get back.
+  private drawWarnings(view: RaceView, scale: number, width: number, height: number, now: number): void {
+    const ctx = this.context;
+    const ratio = Math.min(2, window.devicePixelRatio || 1);
+    for (const car of view.cars) {
+      if (car.state !== "driving" || car.warn <= 0) continue;
+      const spot = this.toScreen(car.x, car.y, view, scale, width, height);
+      const margin = 34 * ratio;
+      const x = Math.max(margin, Math.min(width - margin, spot.x));
+      const y = Math.max(margin + 50 * ratio, Math.min(height - margin, spot.y));
+      const flash = Math.floor(now / 120) % 2 === 0;
+      ctx.fillStyle = flash ? "#ff2828" : CAR_COLORS[car.color % CAR_COLORS.length];
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 3 * ratio;
+      ctx.beginPath();
+      ctx.arc(x, y, 22 * ratio, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Pointing at the car.
+      const angle = Math.atan2(spot.y - y, spot.x - x);
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(angle) * 30 * ratio, y + Math.sin(angle) * 30 * ratio);
+      ctx.lineTo(x + Math.cos(angle + 0.5) * 20 * ratio, y + Math.sin(angle + 0.5) * 20 * ratio);
+      ctx.lineTo(x + Math.cos(angle - 0.5) * 20 * ratio, y + Math.sin(angle - 0.5) * 20 * ratio);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = `900 ${20 * ratio}px "Arial Black", Impact, system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(Math.ceil(car.warn)), x, y + ratio);
+      ctx.font = `bold ${11 * ratio}px system-ui, sans-serif`;
+      ctx.strokeText(car.name, x, y + 34 * ratio);
+      ctx.fillText(car.name, x, y + 34 * ratio);
+    }
   }
 
   private drawParticles(dt: number): void {
@@ -728,7 +973,7 @@ export class RaceRenderer {
       ctx.fillText(fit(ctx, car.state === "out" ? `💀 ${car.name}` : car.name, chip - 34 * ratio), x + 26 * ratio, top + 14 * ratio);
       for (let point = 0; point < view.target; point += 1) {
         ctx.fillStyle = point < car.points ? CAR_COLORS[car.color % CAR_COLORS.length] : "rgba(255,255,255,0.18)";
-        circle(ctx, x + 15 * ratio + point * 13 * ratio, top + 30 * ratio, 4.5 * ratio);
+        circle(ctx, x + 14 * ratio + point * Math.min(13, (chip / ratio - 30) / view.target) * ratio, top + 30 * ratio, 4 * ratio);
       }
     });
     ctx.globalAlpha = 1;
@@ -771,6 +1016,43 @@ export class RaceRenderer {
   }
 }
 
+function drawBody(ctx: CanvasRenderingContext2D, body: (typeof BODIES)[number], color: string): void {
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 2;
+  if (body === "buggy") {
+    roundRect(ctx, -CAR_LENGTH / 2 + 3, -CAR_WIDTH / 2 + 3, CAR_LENGTH - 6, CAR_WIDTH - 6, 5);
+    ctx.fill();
+    ctx.stroke();
+    // Roll cage.
+    ctx.strokeStyle = "#222";
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(-9, -7, 12, 14);
+    ctx.beginPath();
+    ctx.moveTo(-9, -7);
+    ctx.lineTo(3, 7);
+    ctx.stroke();
+    return;
+  }
+  const radius = body === "van" ? 3 : body === "mini" ? 10 : 7;
+  roundRect(ctx, -CAR_LENGTH / 2, -CAR_WIDTH / 2 + 1, CAR_LENGTH, CAR_WIDTH - 2, radius);
+  ctx.fill();
+  ctx.stroke();
+  if (body === "muscle") {
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.fillRect(-CAR_LENGTH / 2 + 2, -3.5, CAR_LENGTH - 4, 2.5);
+    ctx.fillRect(-CAR_LENGTH / 2 + 2, 1, CAR_LENGTH - 4, 2.5);
+  } else if (body === "van") {
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    roundRect(ctx, -CAR_LENGTH / 2 + 3, -CAR_WIDTH / 2 + 4, CAR_LENGTH - 15, CAR_WIDTH - 8, 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = "#fff";
+    roundRect(ctx, -8, -6, 11, 12, 4);
+    ctx.fill();
+  }
+}
+
 const WHEELS: Array<[number, number]> = [
   [-10, -10],
   [10, -10],
@@ -781,7 +1063,7 @@ const WHEELS: Array<[number, number]> = [
 function blend(a: RaceView, b: RaceView, t: number): RaceView {
   const lerp = (from: number, to: number) => from + (to - from) * t;
   const carsBefore = new Map(a.cars.map((car) => [car.id, car]));
-  const rocketsBefore = new Map(a.rockets.map((rocket) => [rocket.id, rocket]));
+  const shotsBefore = new Map(a.shots.map((shot) => [shot.id, shot]));
   return {
     ...b,
     view: { x: lerp(a.view.x, b.view.x), y: lerp(a.view.y, b.view.y), width: lerp(a.view.width, b.view.width), height: lerp(a.view.height, b.view.height) },
@@ -789,11 +1071,16 @@ function blend(a: RaceView, b: RaceView, t: number): RaceView {
       const from = carsBefore.get(car.id);
       // A jump of more than a few car lengths is a respawn or a new grid: don't slide across the map.
       if (!from || from.state !== car.state || Math.hypot(from.x - car.x, from.y - car.y) > 120) return car;
-      return { ...car, x: lerp(from.x, car.x), y: lerp(from.y, car.y), z: lerp(from.z, car.z), angle: from.angle + wrap(car.angle - from.angle) * t, roll: lerp(from.roll, car.roll) };
+      if (car.state === "out") {
+        const strike = from.strike && car.strike ? { ...car.strike, x: lerp(from.strike.x, car.strike.x), y: lerp(from.strike.y, car.strike.y) } : car.strike;
+        return { ...car, strike };
+      }
+      const strike = from.strike && car.strike ? { ...car.strike, x: lerp(from.strike.x, car.strike.x), y: lerp(from.strike.y, car.strike.y) } : car.strike;
+      return { ...car, x: lerp(from.x, car.x), y: lerp(from.y, car.y), z: lerp(from.z, car.z), angle: from.angle + wrap(car.angle - from.angle) * t, roll: lerp(from.roll, car.roll), strike };
     }),
-    rockets: b.rockets.map((rocket) => {
-      const from = rocketsBefore.get(rocket.id);
-      return from ? { ...rocket, x: lerp(from.x, rocket.x), y: lerp(from.y, rocket.y) } : rocket;
+    shots: b.shots.map((shot) => {
+      const from = shotsBefore.get(shot.id);
+      return from ? { ...shot, x: lerp(from.x, shot.x), y: lerp(from.y, shot.y), z: lerp(from.z, shot.z) } : shot;
     }),
   };
 }

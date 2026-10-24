@@ -13,23 +13,31 @@ export type RaceInput = {
   fires: number;
 };
 
-export type WeaponKind = "rocket" | "mines" | "oil" | "shockwave" | "nitro";
+// The nine pickups, after Mashed's: four that fire forwards, four that leave something behind, and the flash bang.
+export type WeaponKind = "missile" | "machinegun" | "shotgun" | "mortar" | "mines" | "drums" | "oil" | "flamethrower" | "flashbang";
 
 export const WEAPON_NAMES: Record<WeaponKind, string> = {
-  rocket: "Rocket",
-  mines: "Mines",
+  missile: "Homing missile",
+  machinegun: "Machine gun",
+  shotgun: "Shotgun",
+  mortar: "Mortar",
+  mines: "Proximity mines",
+  drums: "Drum bombs",
   oil: "Oil slick",
-  shockwave: "Shockwave",
-  nitro: "Nitro",
+  flamethrower: "Flamethrower",
+  flashbang: "Flash bang",
 };
 
-// "out": off the back of the screen this round. "falling": went over the edge and is about to be dropped back on.
+// Weapons that lock on: the car shows a laser sight that turns red on a target.
+export const LOCKING_WEAPONS: WeaponKind[] = ["missile", "machinegun", "mortar"];
+
+// "out": left behind this round. "falling": went over the edge and is about to be dropped back on.
 export type CarState = "driving" | "falling" | "out";
 
 export type RaceCar = {
   id: string;
   name: string;
-  // Index into the car colours, fixed for the whole match.
+  // Index into the car colours and bodies, fixed for the whole match.
   color: number;
   bot: boolean;
   x: number;
@@ -51,9 +59,24 @@ export type RaceCar = {
   roll: number;
   // Just dropped back on after a fall: weapons and bumps pass through it for a moment.
   ghost: boolean;
+  // On fire from a flamethrower: hard to steer.
+  burning: boolean;
+  // The flamethrower is pouring out of the back of this car.
+  flaming: boolean;
+  // Stalled on the line after revving too early.
+  stalled: boolean;
+  // The car a locking weapon has in its sights.
+  lock?: string;
+  // Off the screen: seconds left to get back on before the car blows up. 0 when it's fine.
+  warn: number;
+  // Knocked out this round: where this player is aiming an air strike, and whether one is ready.
+  strike?: { x: number; y: number; ready: boolean };
 };
 
-export type RaceRocket = { id: number; x: number; y: number; angle: number };
+export type ShotKind = "missile" | "bullet" | "mortar" | "drum" | "strike";
+
+// Anything thrown or fired. A mortar or an air strike is in the air, coming down on (tx, ty).
+export type RaceShot = { id: number; kind: ShotKind; x: number; y: number; z: number; angle: number; tx?: number; ty?: number };
 export type RaceMine = { id: number; x: number; y: number; armed: boolean };
 export type RaceSlick = { id: number; x: number; y: number; radius: number };
 export type RaceCrate = { id: number; x: number; y: number };
@@ -62,10 +85,15 @@ export type RaceEvent =
   | { id: number; type: "boom"; x: number; y: number; radius: number }
   | { id: number; type: "pickup"; car: string; weapon: WeaponKind }
   | { id: number; type: "fire"; car: string; weapon: WeaponKind }
+  | { id: number; type: "hit"; x: number; y: number }
   | { id: number; type: "crash"; x: number; y: number; force: number }
   | { id: number; type: "splash"; car: string; x: number; y: number }
+  | { id: number; type: "burn"; car: string }
+  | { id: number; type: "flash"; x: number; y: number }
+  | { id: number; type: "turbo"; car: string }
+  | { id: number; type: "stall"; car: string }
   | { id: number; type: "out"; car: string; x: number; y: number }
-  | { id: number; type: "round"; winner?: string }
+  | { id: number; type: "round"; winner?: string; second?: string; first?: string }
   | { id: number; type: "go" };
 
 export type RacePhase = "countdown" | "racing" | "round_over" | "match_over";
@@ -84,7 +112,7 @@ export type RaceView = {
   // The screen is closing in, late in a round.
   shrinking: boolean;
   cars: RaceCar[];
-  rockets: RaceRocket[];
+  shots: RaceShot[];
   mines: RaceMine[];
   slicks: RaceSlick[];
   crates: RaceCrate[];

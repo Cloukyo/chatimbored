@@ -1,7 +1,7 @@
 // Pile-Up's sound effects, synthesised with Web Audio so there are no files to load.
 // Browsers only allow audio after the first click or key press, so nothing plays until then.
 
-export type Effect = "boom" | "bonk" | "pickup" | "fire" | "whistle" | "splash" | "beep" | "go" | "fanfare" | "honk";
+export type Effect = "boom" | "bonk" | "pickup" | "fire" | "gun" | "shotgun" | "flash" | "stall" | "whistle" | "splash" | "beep" | "go" | "fanfare" | "honk";
 
 const MUTE_KEY = "pile-up:muted";
 
@@ -44,6 +44,21 @@ class Sound {
         break;
       case "fire":
         this.burst(now, 0.3, 0.25, 3000, 400);
+        break;
+      case "gun":
+        // A rattle of eight shots, matching the burst.
+        for (let index = 0; index < 8; index += 1) this.burst(now + index * 0.05, 0.25, 0.04, 5000, 1500);
+        break;
+      case "shotgun":
+        this.burst(now, 0.6, 0.3, 3000, 200);
+        this.burst(now + 0.02, 0.4, 0.2, 2500, 200);
+        break;
+      case "flash":
+        this.burst(now, 0.6, 0.15, 8000, 3000);
+        this.tone(now + 0.05, "sine", 4200, 4000, 1.4, 0.06);
+        break;
+      case "stall":
+        [0, 0.12, 0.26].forEach((at) => this.tone(now + at, "square", 70, 50, 0.1, 0.18));
         break;
       case "whistle":
         // A slide whistle going down: the cartoon exit.

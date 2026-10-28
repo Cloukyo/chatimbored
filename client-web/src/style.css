@@ -403,6 +403,89 @@ label.inline {
   box-shadow: inset 0 0 0 2px #3a4440;
 }
 
+/* The 3D dollhouse of the mansion. The button grid under it stays for screen readers only. */
+.mansion-3d {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border: 1px solid rgb(217 178 92 / 45%);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #0b0608;
+}
+
+.mansion-3d canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.mansion-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.board-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 32%;
+  padding: 3px 10px 4px;
+  border-top: 1px solid rgb(217 178 92 / 35%);
+  border-bottom: 1px solid rgb(217 178 92 / 35%);
+  background: var(--ink);
+  text-align: center;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.board-label strong {
+  font-family: var(--display);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.board-label span {
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.board-label .board-status:empty {
+  display: none;
+}
+
+.board-label.offered strong,
+.board-label.offered .board-status {
+  color: var(--accent);
+}
+
+.board-label.focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgb(217 178 92 / 45%);
+}
+
+.board-label.claimed .board-status {
+  color: var(--owner);
+}
+
+.board-label.dim {
+  opacity: 0.6;
+}
+
+.mansion.has-3d {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  padding: 0;
+}
+
 .room {
   position: relative;
   text-align: left;
@@ -1048,4 +1131,23 @@ button.round svg {
 
 .eyebrow a {
   color: inherit;
+}
+
+@media (max-width: 560px) {
+  .mansion-3d {
+    aspect-ratio: 4 / 3;
+  }
+
+  .board-label {
+    padding: 1px 5px 2px;
+  }
+
+  .board-label strong,
+  .board-label span {
+    font-size: 10px;
+  }
+
+  .board-label .board-detail {
+    display: none;
+  }
 }

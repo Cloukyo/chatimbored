@@ -13,6 +13,7 @@ import {
   type NightOptions,
   type NightSnapshot,
 } from "../../shared/party/night.js";
+import { type BoardRoom, MansionBoard } from "./party/board3d.js";
 import { CrowdGame, type GameSeat, type InputSource } from "./crowd/CrowdGame.js";
 import { PAD, PadEdges, connectedPads } from "./input/pads.js";
 import { roomIcon } from "./party/icons.js";
@@ -638,6 +639,20 @@ function pickRoom(key: MansionRoomKey): void {
   if (picker) sendAs(picker, { type: "PICK_ROOM", roomKey: key });
 }
 
+// The board drawn as a 3D dollhouse of the mansion, made once. The grid of buttons stays for screen readers and old browsers.
+let mansionBoard: MansionBoard | null | undefined;
+
+function renderMansion3d(rooms: BoardRoom[]): void {
+  if (mansionBoard === undefined) {
+    mansionBoard = MansionBoard.create(pickRoom) ?? null;
+    if (mansionBoard) {
+      $("mansion").before(mansionBoard.element);
+      $("mansion").classList.add("has-3d");
+    }
+  }
+  mansionBoard?.update(rooms);
+}
+
 function renderBoard(): void {
   const night = room?.night;
   if (!room || !night) return;
@@ -647,6 +662,7 @@ function renderBoard(): void {
   $("board-title").textContent = `Party Night · Round ${night.roundsPlayed + 1} of ${night.totalRounds}`;
   $("end-night").hidden = !isHost;
 
+  const boardRooms: BoardRoom[] = [];
   $("mansion").replaceChildren(
     ...[...MANSION_ROOMS]
       .sort((a, b) => a.row - b.row || a.col - b.col)
@@ -680,10 +696,26 @@ function renderBoard(): void {
         icon.className = "room-icon";
         icon.innerHTML = roomIcon(mansionRoom.key);
         tile.append(icon, name, mode, state);
+        boardRooms.push({
+          key: mansionRoom.key,
+          col: mansionRoom.col,
+          row: mansionRoom.row,
+          name: mansionRoom.name,
+          detail: mode.textContent,
+          status: owner ? `Claimed by ${nameOf(owner)}` : state.textContent ?? "",
+          owner: owner ? colorOf(owner) : undefined,
+          offered: offered >= 0,
+          focused: offered === boardFocus && offered >= 0 && Boolean(picker),
+          played,
+          closed: Boolean(skipped) && !played,
+          pickable: offered >= 0 && Boolean(picker),
+        });
         tile.addEventListener("click", () => pickRoom(mansionRoom.key));
         return tile;
       }),
   );
+
+  renderMansion3d(boardRooms);
 
   const pickerName = night.pickerId ? nameOf(night.pickerId) : "Someone";
   const last = night.lastRound;

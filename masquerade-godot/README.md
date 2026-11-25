@@ -8,9 +8,23 @@ The Steam version of Morbid Masquerade. The plan is in [docs/godot-remake-plan.m
   `MasqueradeNight` holds the night, `NightRound` runs the layers during a room, `NightSession` drives a whole night
   (board, rooms, results, shop, Mole vote, Last Dance, standings).
 - `tests/`: headless tests, including the parity test against rounds recorded on the Node server.
-- `debug/`: a flat test bench to play the rooms or a whole night (keyboard plus any controllers). Not the game's look.
+- `view/`: the 3D picture. `CrowdView3D` draws a round from the view dictionaries the rules hand out, so it
+  works the same for a local round or one sent over the network. Rooms, figures, masks and props are placeholders;
+  see [view/README.md](view/README.md) for swapping in modelled art.
+- `game/`: the game scene. `PlayDriver` runs quick play or a night on one screen (keyboard is player 1, each
+  controller the next); `GameHud` is the HUD.
+- `debug/`: a flat test bench with the same driver, for checking rules without the 3D view.
 
-Open this folder in Godot 4.7 and press Play for the test bench.
+Open this folder in Godot 4.7 and press Play. Keys: WASD move, Shift run, E act, click to shoot. Tab next room,
+R restart, N a full night, 1-3 pick a room on the night's board, Enter to go on. Controllers: left stick, B run,
+A act, X shoots the nearest person ahead.
+
+Screenshots without a screen (Linux, with Xvfb):
+
+```
+xvfb-run -a godot --path masquerade-godot --rendering-driver opengl3 --write-movie /tmp/shot.png \
+  --fixed-fps 20 --quit-after 120 -- --demo --room=marked      # or --night
+```
 
 ## Tests
 

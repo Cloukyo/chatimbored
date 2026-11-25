@@ -14,6 +14,14 @@
 
 Codex and VS Code should open the repo root, not only the Godot folder.
 
+## Morbid Masquerade in Godot (Steam)
+
+- `masquerade-godot/` is the Godot 4.7 remake of Morbid Masquerade for Steam (plan: `docs/godot-remake-plan.md`). The rules run inside the game; one player's copy hosts.
+- `masquerade-godot/rules/` is a call-for-call GDScript port of `server/src/crowd/`. Keep it that way: the same seed must replay the same round. `tests/test_parity.gd` replays rounds recorded by `tests/parity/record.ts` on the Node rules; after changing rules on either side, change both and re-record.
+- Vectors are `{x, y}` dictionaries of 64-bit floats, not `Vector2` (32-bit). Use `CrowdMovement.js_round` where the server uses `Math.round`.
+- Each round gets fresh `CrowdRules` instances, so modes keep round state on themselves (the server used WeakMaps). Lazy state (`state()`) is created on first use, as on the server, to keep the random sequence identical.
+- Run tests with `masquerade-godot/tests/run.sh` (set `GODOT`). It fails on any script error, not just failed asserts.
+
 ## Server-Authoritative Rules
 
 - The server owns room state, player membership, ready state, minigame phase, timers, scores, and winners.

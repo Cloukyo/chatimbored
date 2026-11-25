@@ -4,6 +4,7 @@ extends Node2D
 ## Keyboard: WASD move, Shift run, E act, click someone to shoot them.
 ## Each controller joins as another player: left stick move, B run, A act, X shoots whoever is nearest ahead.
 ## Tab: next room. R: restart. F1: show who the players are (a cheat, for testing only).
+## N: start a full night instead (1-3 picks a room on the board, Enter moves on / skips a step).
 
 const PLAYER_COUNT := 4
 const KEYBOARD := "p1"
@@ -15,18 +16,22 @@ var seqs := {}
 var reveal := false
 ## device id -> player id
 var pads := {}
+## Set while a full night is running instead of quick play.
+var session: NightSession = null
 
 
 func _ready() -> void:
 	_start()
 
 
-func _start() -> void:
-	var mode: String = CrowdModes.ids()[round_index % CrowdModes.ids().size()]
+func _players() -> Array:
 	var players := []
 	for i in PLAYER_COUNT:
 		players.append({"id": "p%d" % (i + 1), "name": "Player %d" % (i + 1), "score": 0})
-	game = QuickPlayRound.new(mode, players)
+	return players
+
+
+func _seat_pads() -> int:
 	pads.clear()
 	var next := 2
 	for device in Input.get_connected_joypads():
@@ -34,11 +39,27 @@ func _start() -> void:
 			break
 		pads[device] = "p%d" % next
 		next += 1
-	# Seats nobody is sitting in walk with the crowd, so a room always has enough players.
-	for i in range(next, PLAYER_COUNT + 1):
-		var slot: CrowdSlot = game.crowd.slots["p%d" % i]
-		if not slot.entity.hidden:
+	return next
+
+
+## Seats nobody is sitting in walk with the crowd, so a room always has enough players.
+func _fill_empty_seats(crowd: CrowdMatch, first_empty: int) -> void:
+	for i in range(first_empty, PLAYER_COUNT + 1):
+		var slot: CrowdSlot = crowd.slots.get("p%d" % i)
+		if slot != null and not slot.entity.hidden:
 			slot.entity.give_brain()
+
+
+func _start_night() -> void:
+	session = NightSession.new(_players(), 4, false)
+	_seat_pads()
+
+
+func _start() -> void:
+	session = null
+	var mode: String = CrowdModes.ids()[round_index % CrowdModes.ids().size()]
+	game = QuickPlayRound.new(mode, _players())
+	_fill_empty_seats(game.crowd, _seat_pads())
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -51,6 +72,30 @@ func _unhandled_input(event: InputEvent) -> void:
 				_start()
 			KEY_F1:
 				reveal = not reveal
+			KEY_N:
+				_start_night()
+			KEY_1, KEY_2, KEY_3:
+				if session != null and session.phase == "board":
+					var choice: int = event.keycode - KEY_1
+					if choice < session.night.offered.size():
+						session.pick_room(session.night.picker_id, session.night.offered[choice])
+						_fill_empty_seats(session.crowd, pads.size() + 2)
+			KEY_ENTER:
+				if session != null:
+					_night_continue()
+
+
+## Enter moves the night on: past results, and skips the shop, the vote and backing as the group's host.
+func _night_continue() -> void:
+	match session.phase:
+		"results":
+			session.next(session.host_id())
+		"shop", "mole_vote":
+			session.night_action(session.host_id(), {"kind": "skip"})
+		"finale_pick":
+			session.night_action(session.host_id(), {"kind": "skip"})
+			if session.crowd != null:
+				_fill_empty_seats(session.crowd, pads.size() + 2)
 
 
 func _process(delta: float) -> void:
@@ -60,16 +105,22 @@ func _process(delta: float) -> void:
 		_send(KEYBOARD, _keyboard_input())
 		for device in pads:
 			_send(pads[device], _pad_input(device, pads[device]))
-		game.update()
-		if game.should_finish() and not game.finished:
-			game.finish()
+		if session != null:
+			session.update()
+		else:
+			game.update()
+			if game.should_finish() and not game.finished:
+				game.finish()
 	queue_redraw()
 
 
 func _send(player_id: String, input: Dictionary) -> void:
 	seqs[player_id] = seqs.get(player_id, 0) + 1
 	input.seq = seqs[player_id]
-	game.handle_input(player_id, input)
+	if session != null:
+		session.handle_input(player_id, input)
+	else:
+		game.handle_input(player_id, input)
 
 
 func _keyboard_input() -> Dictionary:
@@ -106,12 +157,20 @@ func _pad_input(device: int, player_id: String) -> Dictionary:
 
 
 ## Controller shots pick the nearest person roughly along the stick, so aiming isn't a skill.
+func _crowd() -> CrowdMatch:
+	if session != null:
+		return session.crowd
+	return game.crowd
+
+
 func _nearest_ahead(player_id: String, stick: Vector2) -> CrowdEntity:
-	var me: CrowdEntity = game.crowd.slots[player_id].entity
+	if _crowd() == null or not _crowd().slots.has(player_id):
+		return null
+	var me: CrowdEntity = _crowd().slots[player_id].entity
 	var facing := stick.normalized() if stick.length() > 0.3 else Vector2.RIGHT.rotated(me.facing * PI / 4)
 	var best: CrowdEntity = null
 	var best_score := INF
-	for e: CrowdEntity in game.crowd.visible_entities():
+	for e: CrowdEntity in _crowd().visible_entities():
 		if e == me or e.dead:
 			continue
 		var offset := Vector2(e.x - me.x, e.y - me.y)
@@ -125,7 +184,9 @@ func _nearest_ahead(player_id: String, stick: Vector2) -> CrowdEntity:
 
 func _entity_near(point: Vector2, reach: float) -> CrowdEntity:
 	var best: CrowdEntity = null
-	for e: CrowdEntity in game.crowd.visible_entities():
+	if _crowd() == null:
+		return null
+	for e: CrowdEntity in _crowd().visible_entities():
 		if not e.dead and Vector2(e.x, e.y).distance_to(point) <= reach:
 			if best == null or Vector2(e.x, e.y).distance_to(point) < Vector2(best.x, best.y).distance_to(point):
 				best = e
@@ -133,12 +194,15 @@ func _entity_near(point: Vector2, reach: float) -> CrowdEntity:
 
 
 func _draw() -> void:
-	var crowd := game.crowd
+	if session != null and session.crowd == null:
+		_draw_night_screen()
+		return
+	var crowd := _crowd()
 	var arena := crowd.arena
 	draw_rect(Rect2(0, 0, arena.width, arena.height), Color("2a0f14"))
 	if arena.has("exitX"):
 		draw_rect(Rect2(arena.exitX, 0, arena.width - arena.exitX, arena.height), Color("3d2a10"))
-	var view := game.view_for(KEYBOARD)
+	var view: Dictionary = session.crowd_view_for(KEYBOARD) if session != null else game.view_for(KEYBOARD)
 	if view.has("zone"):
 		draw_arc(Vector2(view.zone.x, view.zone.y), view.zone.r, 0, TAU, 96, Color("f2d27a"), 2)
 	for prop in crowd.props:
@@ -163,13 +227,46 @@ func _draw() -> void:
 		if event.type == "shot":
 			draw_line(Vector2(event.from.x, event.from.y), Vector2(event.to.x, event.to.y), Color(1, 1, 1, 0.4), 1)
 	var font := ThemeDB.fallback_font
+	var ms_left: int = session.ms_left if session != null else game.ms_left
 	var lines := [
-		"%s   %ds left   (Tab: next room, R: restart, F1: reveal)" % [CrowdModes.NAMES[crowd.rules.mode], game.ms_left / 1000],
+		"%s   %ds left   (Tab: next room, R: restart, N: full night, F1: reveal)" % [CrowdModes.NAMES.get(crowd.rules.mode, "Last Dance"), ms_left / 1000],
 		"You (keyboard): %s, shots %d, %s" % [view.role, view.shots, "can act" if view.canAct else ""],
 		"HUD: %s" % [view.hud],
-		"Controllers: %d   Scores: %s" % [pads.size(), game.scores()],
 	]
-	if game.winner_id != "":
-		lines.append("Winner: %s" % game.winner_id)
+	if session != null:
+		lines.append("Night: %s" % [view.get("party", {})])
+		if session.phase == "results":
+			lines.append("Round over: %s   (Enter to go on)" % [session.night.last_round.get("points", {})])
+	else:
+		lines.append("Controllers: %d   Scores: %s" % [pads.size(), game.scores()])
+		if game.winner_id != "":
+			lines.append("Winner: %s" % game.winner_id)
 	for i in lines.size():
 		draw_string(font, Vector2(12, 22 + i * 18), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("f5e6c8"))
+
+
+## Between rooms: the board, shop, vote, backing and final standings, as plain text.
+func _draw_night_screen() -> void:
+	draw_rect(Rect2(0, 0, 1280, 720), Color("1d0b0f"))
+	var night := session.night
+	var lines := ["The night: room %d of %d   (phase: %s)" % [night.played.size() + 1, night.total_rounds, session.phase], ""]
+	match session.phase:
+		"board":
+			lines.append("%s picks the next room. Press 1-3:" % session.name_of(night.picker_id))
+			for i in night.offered.size():
+				var room := NightData.room(night.offered[i])
+				lines.append("  %d. %s (%s)%s" % [i + 1, room.name, CrowdModes.NAMES[room.mode], "   claimed by " + session.name_of(night.claims[room.key]) if night.claims.has(room.key) else ""])
+		"shop", "mole_vote", "finale_pick":
+			lines.append("Press Enter to skip this step.")
+		"night_over":
+			lines.append("Final standings (N for another night, R for quick play):")
+			for standing in night.standings():
+				lines.append("  %s: %d (%d points, %d rooms)" % [session.name_of(standing.playerId), standing.total, standing.points, standing.rooms])
+			for award in night.awards():
+				lines.append("  %s: %s, %s" % [award.title, session.name_of(award.playerId), award.detail])
+	lines.append("")
+	lines.append("Points: %s" % [night.points])
+	lines.append("Rooms claimed: %s" % [night.claims])
+	var font := ThemeDB.fallback_font
+	for i in lines.size():
+		draw_string(font, Vector2(40, 60 + i * 24), lines[i], HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color("f5e6c8"))

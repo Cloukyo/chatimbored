@@ -11,6 +11,11 @@ var mode := ""
 var arena: Dictionary = PLAZA
 var npc_count := 44
 var can_run := false
+## Set by the night: a twist that gives everyone who has shots one more.
+var bonus_shots := 0
+## Set by the night: wraps npc_plan (suspicious players get a wide berth, a restless crowd).
+## Called as night_plan.call(entity, random, area, crowd) in place of npc_plan.
+var night_plan := Callable()
 
 
 ## player_id -> role. Defaults to everyone a "runner".
@@ -23,6 +28,12 @@ func assign_roles(player_ids: Array, _random: CrowdRandom) -> Dictionary:
 
 func shots_for(_role: String) -> int:
 	return 0
+
+
+## What a player starts the round with, twists included.
+func starting_shots(role: String) -> int:
+	var shots := shots_for(role)
+	return shots + bonus_shots if shots > 0 else 0
 
 
 ## Roles that don't walk in the crowd (Lookouts watching from above).
@@ -55,6 +66,13 @@ func spawn_point(random: CrowdRandom, area: Dictionary) -> Dictionary:
 ## The next thing an NPC does: {direction, duration_ms}.
 func npc_plan(entity: CrowdEntity, random: CrowdRandom, area: Dictionary, _crowd: CrowdMatch) -> Dictionary:
 	return wander(entity, random, area)
+
+
+## What the match calls: the night's wrapper if there is one, otherwise the mode's own plan.
+func plan_for(entity: CrowdEntity, random: CrowdRandom, area: Dictionary, crowd: CrowdMatch) -> Dictionary:
+	if night_plan.is_valid():
+		return night_plan.call(entity, random, area, crowd)
+	return npc_plan(entity, random, area, crowd)
 
 
 ## The lit area {x, y, r}, or an empty dictionary for none.

@@ -19,10 +19,11 @@ server is only needed for the phone companion. The web version keeps running whi
 
 Rough sizes assume steady work. Each one ends with something you can try.
 
-1. **Rules inside the game** (this first PR). Crowd movement, `CrowdMatch`, the nine rooms, quick-play scoring,
+1. **Rules inside the game** (done, PR #16). Crowd movement, `CrowdMatch`, the nine rooms, quick-play scoring,
    the server's tests ported, the parity test, and a flat test bench scene to play with keyboard and controllers.
-2. **Party Night** (about 1 week). Port `server/src/party/` (points, room picks, shop, contracts, suspicion, ghosts,
-   Host, Last Dance, awards) with its tests and a parity check.
+2. **The full night** (done, PR #16; the mode's name is still to be decided, "Party Night" is out). Port of
+   `server/src/party/` (points, room picks, shop, contracts, suspicion, ghosts, Host, Last Dance, awards) with its
+   tests and a check that whole nights replay identically.
 3. **The 3D ballroom** (3 to 5 weeks, the biggest step). Rebuild `scene3d.ts` in Godot: the ballroom, figures with
    oversized animal masks facing the camera, light pools, floor markings, the invitation HUD, the mansion board from
    PR #15, sound and the waltz. Rigged, animated figures become possible here.

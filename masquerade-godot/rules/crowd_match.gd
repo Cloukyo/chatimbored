@@ -62,7 +62,7 @@ func _init(round_rules: CrowdRules, player_ids: Array, round_random: CrowdRandom
 		slot.player_id = player_id
 		slot.entity = entity
 		slot.role = roles.get(player_id, "runner")
-		slot.shots = rules.shots_for(slot.role)
+		slot.shots = rules.starting_shots(slot.role)
 		entity.hidden = not rules.in_crowd(slot.role)
 		slots[player_id] = slot
 	rules.on_start(self)
@@ -153,7 +153,7 @@ func step() -> void:
 			continue
 		entity.brain_timer_ms -= CrowdMovement.TICK_MS
 		if entity.brain_timer_ms <= 0:
-			var next := rules.npc_plan(entity, random, arena, self)
+			var next := rules.plan_for(entity, random, arena, self)
 			entity.direction = next.direction
 			entity.brain_timer_ms = next.duration_ms
 		_move(entity)

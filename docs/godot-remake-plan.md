@@ -24,13 +24,17 @@ Rough sizes assume steady work. Each one ends with something you can try.
 2. **The full night** (done, PR #16; the mode's name is still to be decided, "Party Night" is out). Port of
    `server/src/party/` (points, room picks, shop, contracts, suspicion, ghosts, Host, Last Dance, awards) with its
    tests and a check that whole nights replay identically.
-3. **The 3D ballroom** (in progress, PR #16; 3 to 5 weeks in all, the biggest step). Done so far: every room
-   rebuilt from `scene3d.ts` in Godot with placeholder art (floors, walls, dressing, chandeliers, lamps, the same
-   camera), figures with animal masks facing the camera, props, shots, floor markings, the Closing Time light, and a
-   HUD styled like an invitation, playable as quick play or a whole night. Still to do: name tags and crosshairs,
-   the mansion board from PR #15, sound and the waltz, and rigged, animated figures once the art is modelled.
-4. **Couch play** (about 1 week). Many controllers on one screen, rumble for secrets, the shared-screen rules
-   (nobody marked, private-word modes off without phones).
+3. **The 3D ballroom and a packaged game** (first pass done, PR #16). Every room rebuilt from `scene3d.ts` in Godot
+   with placeholder art (floors, walls, dressing, chandeliers, lamps, the same camera), figures with animal masks,
+   props, shots, floor markings, crosshairs and the Closing Time light. Around it, a whole game from start to
+   finish: title screen, main menu, how to play, options saved between runs (volume, window, V-Sync, rumble), a join
+   screen where each keyboard or controller takes a seat and the first player sets the rules (computer players,
+   rooms, house rules), a pause menu, every between-room screen of the night (board, results, shop, Mole vote,
+   backing, final standings and awards), quick-play results, music and sound baked from the web client's recipes,
+   and Windows and Linux exports. Still to do: the illustrated mansion board from PR #15, and rigged, animated
+   figures once the art is modelled.
+4. **Couch play** (mostly done in PR #16; needs a test with real controllers). Many controllers on one screen,
+   rumble for secrets, the shared-screen rules (nobody marked, private-word modes off without phones).
 5. **Online through Steam** (2 to 3 weeks). GodotSteam lobbies and Steam networking: the host steps the match at
    20 Hz and sends each peer its view; peers send inputs and predict their own figure with `CrowdMovement`. Away and
    reconnect as on the web. Before the Steam app exists this can be tested over plain ENet, with a headless Godot

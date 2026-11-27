@@ -11,8 +11,16 @@ const SHOT_HEIGHT := 1.2
 const EFFECT_MS := {"shot": 260.0, "puff": 500.0, "strike": 300.0, "flare": 900.0, "bump": 600.0}
 const GROUND_SCALE := 0.5
 
+## A new event from the rules (a shot, a fall, a lantern lit...), once each, for sound. `prop_kind`
+## names the prop for "flare" events.
+signal event_seen(event: Dictionary, prop_kind: String)
+
 ## Screen pixels the HUD covers at the top; the camera keeps the floor below it.
 var top_px := 96.0
+## Draw this room style whatever the mode (the menus' backdrop uses the ballroom).
+var style_override := ""
+## [{at, ready}]: where Lookouts and the host aim from above, drawn on the floor.
+var crosshairs: Array = []
 var camera := Camera3D.new()
 var key := SpotLight3D.new()
 var environment := Environment.new()
@@ -134,7 +142,7 @@ func _z(arena_y: float) -> float:
 
 
 func _set_room(mode: String, room_arena: Dictionary) -> void:
-	var style: String = Room.STYLE_OF.get(mode, "plaza")
+	var style: String = style_override if style_override != "" else Room.STYLE_OF.get(mode, "plaza")
 	var room_key := "%s:%sx%s:%s" % [style, room_arena.width, room_arena.height, room_arena.get("exitX", "")]
 	if room_key == _room_key:
 		return
@@ -244,6 +252,12 @@ func _take_events(view: Dictionary) -> void:
 		if _seen_events.has(event.id):
 			continue
 		_seen_events[event.id] = true
+		var prop_kind := ""
+		if event.type == "flare":
+			for prop: Dictionary in view.props:
+				if prop.id == event.prop:
+					prop_kind = prop.kind
+		event_seen.emit(event, prop_kind)
 		match event.type:
 			"shot":
 				_effects.append({"kind": "shot", "born": _now_ms, "from": event.from, "to": event.to})
@@ -321,6 +335,12 @@ func _paint_ground(canvas: CanvasItem) -> void:
 		var outer := Vector2(arena.width, arena.height).length()
 		canvas.draw_arc(c, (zone.r + outer) / 2, 0, TAU, 96, Color8(8, 10, 16, 158), outer - zone.r)
 		canvas.draw_arc(c, zone.r, 0, TAU, 96, Color8(255, 220, 150, 89), 3)
+	for crosshair: Dictionary in crosshairs:
+		var c := Vector2(crosshair.at.x, crosshair.at.y)
+		var colour := Color8(255, 226, 120, 230) if crosshair.ready else Color8(236, 230, 214, 100)
+		canvas.draw_arc(c, 14, 0, TAU, 32, colour, 3)
+		for direction in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN]:
+			canvas.draw_line(c + direction * 6, c + direction * 22, colour, 3)
 	for effect: Dictionary in _effects:
 		var age := effect_age(effect)
 		match effect.kind:

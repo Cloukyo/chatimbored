@@ -12,9 +12,56 @@ static func keys_for(pad: bool) -> Dictionary:
 	return {"shoot": "Click", "act": "E", "run": "Shift"}
 
 
+const TRICK_NAMES := {"toast": "Toast", "conga": "Conga", "spotlight": "Spotlight"}
+
+
+## A shared screen: what everyone needs, with nothing that gives anyone away. Secrets come as rumble.
+static func shared_lines(view: Dictionary, name_of: Callable) -> Array:
+	var hud: Dictionary = view.hud
+	var progress := "%s/%s" % [hud.get("progress", 0), hud.get("goal", 0)]
+	var out := []
+	match view.mode:
+		"act_natural", "freeze_frame":
+			out = ["Reach the exit first"]
+		"silent_witness":
+			out = ["One long buzz: you're the Killer", "Bodies %s/%s" % [hud.get("kills", 0), hud.get("killTarget", 5)]]
+		"bell_ringers":
+			out = ["One long buzz: you're a Ringer", "No figure? You're a Lookout: aim from above", "Bells " + progress]
+		"lantern_festival":
+			out = ["Light all five lanterns", "A buzz means you lit one"]
+		"heist_hour":
+			out = ["Crack three different vaults", "A buzz means you cracked one"]
+		"hot_parcel":
+			out = ["A heartbeat means you have the parcel", "Last one standing wins"]
+		"closing_time":
+			out = ["Stay in the light", "A buzz means you're in the dark"]
+		"marked":
+			out = ["Marked needs a private screen for each player"]
+		"last_dance":
+			out = ["The finalists hit each other to win the night", "Everyone else steers a guest as a ghost"]
+	out.append("Stick moves · A acts · X shoots · B runs")
+	var party: Dictionary = view.get("party", {})
+	if party.has("hostName"):
+		out.append_array(host_lines(party, keys_for(true), party.hostName))
+	if party.has("wanted"):
+		out.append("Wanted: the leader is %s" % name_of.call(party.wanted))
+	return out
+
+
+static func host_lines(party: Dictionary, keys: Dictionary, host_name := "") -> Array:
+	var trick: String = TRICK_NAMES.get(party.get("trick", ""), "Toast")
+	return [
+		"[b]Party Host[/b]%s" % (": " + host_name if host_name != "" else ""),
+		"%s plays [b]%s[/b] (%d left)" % [keys.shoot, trick, party.tricksLeft] if party.get("tricksLeft", 0) > 0 else "Out of tricks",
+		"%s changes trick" % keys.act,
+	]
+
+
 static func lines(view: Dictionary, keys: Dictionary, name_of: Callable) -> Array:
-	if view.is_empty() or view.role == "host":
+	if view.is_empty():
 		return []
+	if view.role == "host":
+		return host_lines(view.get("party", {}), keys)
 	var hud: Dictionary = view.hud
 	var progress := "%s/%s" % [hud.get("progress", 0), hud.get("goal", 0)]
 	var shot := func(aim: String) -> String: return "%s to shoot %s (%d left)" % [keys.shoot, aim, view.shots] if view.shots > 0 else "Out of shots"

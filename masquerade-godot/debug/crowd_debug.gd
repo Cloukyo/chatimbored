@@ -21,11 +21,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_TAB:
 				driver.next_room()
 			KEY_R:
-				driver.start_quick()
+				driver.restart_room()
 			KEY_F1:
 				reveal = not reveal
 			KEY_N:
-				driver.start_night()
+				driver.start_night(4)
 			KEY_1, KEY_2, KEY_3:
 				driver.pick(event.keycode - KEY_1)
 			KEY_ENTER:
@@ -100,7 +100,7 @@ func _draw() -> void:
 		if session.phase == "results":
 			lines.append("Round over: %s   (Enter to go on)" % [session.night.last_round.get("points", {})])
 	else:
-		lines.append("Controllers: %d   Scores: %s" % [driver.pads.size(), game.scores()])
+		lines.append("Controllers: %d   Scores: %s" % [driver.humans().size(), game.scores()])
 		if game.winner_id != "":
 			lines.append("Winner: %s" % game.winner_id)
 	for i in lines.size():
